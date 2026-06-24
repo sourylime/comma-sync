@@ -1,27 +1,31 @@
-// comma-sync core — a single cross-platform binary that will eventually back all
-// the front-ends. WORK IN PROGRESS: `discover` and `list` are implemented; `sync`
-// and `restitch` are stubbed (use ../comma-sync.sh for those until they land).
-//
-// The existing bash script and macOS app are unaffected — this is built alongside.
+// comma-sync core — a single cross-platform binary backing the front-ends.
+// The bash script and macOS app are unaffected; this is built alongside them.
 package main
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 )
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `comma-sync (core, WIP)
+	fmt.Fprintln(os.Stderr, `comma-sync (core)
 
 Usage:
-  comma-sync discover            Find the comma on the network, print its IP
-  comma-sync list [--json]       List drives on this computer + still on the comma
-  comma-sync sync [routes...]    (not yet implemented — use ../comma-sync.sh)
-  comma-sync restitch <route>    (not yet implemented — use ../comma-sync.sh)
+  comma-sync discover               Find the comma, print its IP (JSON)
+  comma-sync list [--json]          List drives on this computer + still on the comma
+  comma-sync sync [--json]          Download new drives and stitch them
+  comma-sync restitch <route> [--json]   Re-stitch one drive (re-downloads if needed)
   comma-sync version
 
-Env: ROOT, CHUNKS_DIR, COMMA_IP, REMOTE_PORT, SSH_KEY, WITH_AUDIO`)
+Env: ROOT, CHUNKS_DIR, COMMA_IP, REMOTE_PORT, SSH_KEY, WITH_AUDIO,
+     CLEAN_RAW, SKIP_LATEST, MIN_AGE_SECS, FPS, USE_USB, USB_PORT`)
+}
+
+func fail(err error) {
+	fmt.Fprintln(os.Stderr, "!! "+err.Error())
+	os.Exit(1)
 }
 
 func main() {
@@ -29,25 +33,37 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+
+	// shared flag parsing
+	var positional []string
+	for _, a := range os.Args[2:] {
+		switch {
+		case a == "--json":
+			jsonProgress = true
+		case strings.HasPrefix(a, "-"):
+			// ignore unknown flags for now
+		default:
+			positional = append(positional, a)
+		}
+	}
+
 	switch os.Args[1] {
 	case "discover":
-		ip, err := discover()
+		host, _, cleanup, err := target()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "!! "+err.Error())
-			os.Exit(1)
+			fail(err)
 		}
-		out, _ := json.Marshal(map[string]string{"ip": ip, "transport": "wifi"})
+		cleanup()
+		transport := "wifi"
+		if useUSB() {
+			transport = "usb"
+		}
+		out, _ := json.Marshal(map[string]string{"ip": host, "transport": transport})
 		fmt.Println(string(out))
 
 	case "list":
-		jsonOut := false
-		for _, a := range os.Args[2:] {
-			if a == "--json" {
-				jsonOut = true
-			}
-		}
 		drives := listDrives()
-		if jsonOut {
+		if jsonProgress {
 			out, _ := json.Marshal(drives)
 			fmt.Println(string(out))
 		} else {
@@ -57,12 +73,22 @@ func main() {
 			}
 		}
 
-	case "sync", "restitch":
-		fmt.Fprintln(os.Stderr, "!! '"+os.Args[1]+"' is not implemented in the core yet — use ../comma-sync.sh for now.")
-		os.Exit(3)
+	case "sync":
+		if err := cmdSync(); err != nil {
+			fail(err)
+		}
+
+	case "restitch":
+		if len(positional) == 0 {
+			fmt.Fprintln(os.Stderr, "usage: comma-sync restitch <route>")
+			os.Exit(2)
+		}
+		if err := cmdRestitch(positional[0]); err != nil {
+			fail(err)
+		}
 
 	case "version":
-		fmt.Println("comma-sync core 0.1.0-dev")
+		fmt.Println("comma-sync core 0.2.0")
 
 	default:
 		usage()

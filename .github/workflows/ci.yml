@@ -44,21 +44,26 @@ jobs:
           name: Comma-Sync-macOS
           path: Comma-Sync-macOS.zip
 
+  go-core:
+    name: Build Go core
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Vet
+        working-directory: core
+        run: go vet ./...
+      - name: Build
+        working-directory: core
+        run: go build ./...
+
   # ---------------------------------------------------------------------------
-  # Future phases plug in here as a build matrix across all three OSes. The
-  # GitHub-hosted runners (ubuntu / macos / windows) become the test bench for
-  # platforms the maintainer can't build locally.
-  #
-  # go-core:
-  #   strategy:
-  #     matrix:
-  #       os: [ubuntu-latest, macos-latest, windows-latest]
-  #   runs-on: ${{ matrix.os }}
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: actions/setup-go@v5
-  #     - run: go build ./cmd/comma-sync
-  #
+  # Phase 2 (GUI) plugs in here when ready:
   # tauri-gui:
   #   strategy:
   #     matrix:

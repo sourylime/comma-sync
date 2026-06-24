@@ -13,30 +13,33 @@ ROOT="/path/to/Comma Footage" ./comma-sync list
 ./comma-sync discover
 ```
 
-## Status
+## Status — Phase 1 feature-complete
 
 | Command | State | Notes |
 |---------|-------|-------|
-| `discover` | ✅ working | native port scan + SSH probe for `/data/openpilot`, IP cache |
-| `list [--json]` | ✅ working | local chunks + device drives, ffprobe audio detection |
-| `sync [routes…]` | ⏳ stub | prints "use ../comma-sync.sh" for now |
-| `restitch <route>` | ⏳ stub | same |
+| `discover` | ✅ | native port scan + SSH probe for `/data/openpilot`, IP cache |
+| `list [--json]` | ✅ | local chunks + device drives, ffprobe audio detection |
+| `sync [--json]` | ✅ | download new drives (SFTP, resume) + stitch + ledger + cleanup |
+| `restitch <route> [--json]` | ✅ | collision-safe; re-downloads if chunks absent |
+| USB fallback (`USE_USB=1`) | ✅ | `adb forward` tunnel → `127.0.0.1` |
 | `version` | ✅ | |
 
-Connectivity uses native `golang.org/x/crypto/ssh` (no `ssh`/`rsync` binaries
-needed). `ffprobe`/`ffmpeg` are still shelled out to.
+Connectivity is native `golang.org/x/crypto/ssh` + `github.com/pkg/sftp` — **no
+`ssh`/`rsync` binaries required**. `ffmpeg`/`ffprobe` are still shelled out to.
+Downloads preserve device mtimes (the recording-start stamp depends on them) and
+resume partial files. `sync`/`restitch` emit one JSON object per line with `--json`.
 
-## Next steps (to finish Phase 1)
+### Verified
+- `discover`, `list`/`--json` against the live device and locally.
+- Full **stitch path** (concat + audio mux + collision-safe naming) and the
+  **offline `sync` + ledger** flow, via synthetic fixtures.
+- Cross-OS **build** (ubuntu/macOS/windows) in CI.
 
-1. **`sync`** — implement the pull with `github.com/pkg/sftp` over the existing
-   SSH client (resume via file offset/size), honoring the ledger
-   (`.processed_routes`) and the `MIN_AGE_SECS` "still recording" rule.
-2. **Stitch** — concatenate each camera's HEVC segments and mux audio from
-   `qcamera.ts` via `ffmpeg` (same flags as the script: `-framerate 20 -c copy
-   -tag:v hvc1`, no `-shortest`). Emit `ProgressEvent` JSON lines (see types.go).
-3. **`restitch`** — collision-safe `" (N)"` naming; re-download if chunks absent.
-4. **USB mode** — `USE_USB=1` via `adb forward`, then point at `127.0.0.1`.
-5. **CI** — uncomment the `go-core` matrix job in `.github/workflows/ci.yml` to
-   build for ubuntu/macos/windows on every push.
+### Not yet exercised live
+- The SFTP download from a device and USB tunnel were validated by code review +
+  the proven bash equivalents, but not run end-to-end here (device was offline).
+  First real run should confirm a device pull.
 
-The bash `comma-sync.sh` is the reference implementation for all of the above.
+## What's next (Phase 2)
+A cross-platform GUI (Tauri) that calls this binary and consumes its `--json`
+progress stream. The bash `comma-sync.sh` remains the reference implementation.

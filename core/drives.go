@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 var segRe = regexp.MustCompile(`^(.*)--(\d+)$`)
@@ -128,15 +130,20 @@ for r in $(ls -1d *--*/ 2>/dev/null | sed -E "s#--[0-9]+/##" | sort -u); do
 done`
 
 func listDevice() []Drive {
-	ip, err := discover()
+	host, port, cleanup, err := target()
 	if err != nil {
 		return nil
 	}
-	c, err := dial(ip, commaPort(), 8*time.Second)
+	defer cleanup()
+	c, err := dial(host, port, 8*time.Second)
 	if err != nil {
 		return nil
 	}
 	defer c.Close()
+	return listDeviceWith(c)
+}
+
+func listDeviceWith(c *ssh.Client) []Drive {
 	out, _ := runCmd(c, remoteListScript)
 
 	var drives []Drive

@@ -50,3 +50,22 @@ func labelFor(cam string) string {
 }
 
 func joinCams(c []string) string { return strings.Join(c, ",") }
+
+func cleanRaw() bool   { return os.Getenv("CLEAN_RAW") == "1" }
+func skipLatest() bool { return envOr("SKIP_LATEST", "1") != "0" }
+func useUSB() bool     { return os.Getenv("USE_USB") == "1" }
+func fps() string      { return envOr("FPS", "20") }
+
+func minAgeSecs() int64 {
+	if n, err := strconv.ParseInt(envOr("MIN_AGE_SECS", "120"), 10, 64); err == nil {
+		return n
+	}
+	return 120
+}
+
+func usbPort() int {
+	if n, err := strconv.Atoi(envOr("USB_PORT", "2222")); err == nil && n > 0 {
+		return n
+	}
+	return 2222
+}
