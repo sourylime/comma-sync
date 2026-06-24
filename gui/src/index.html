@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Comma Sync</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="hdr">
+    <div class="logo">🚗</div>
+    <div>
+      <h1>Comma Sync</h1>
+      <p class="sub">Pull new drives off your comma and stitch them into videos</p>
+    </div>
+  </header>
+
+  <section class="card">
+    <div class="frow">
+      <div class="ficon">🎞️</div>
+      <div class="fmeta">
+        <div class="ftitle">Stitched videos</div>
+        <div class="fpath" id="outPath">Not set</div>
+      </div>
+      <button class="btn" data-pick="out">Choose…</button>
+    </div>
+    <div class="divider"></div>
+    <div class="frow">
+      <div class="ficon">📦</div>
+      <div class="fmeta">
+        <div class="ftitle">Raw HEVC chunks</div>
+        <div class="fpath" id="chunkPath">Not set</div>
+      </div>
+      <button class="btn" data-pick="chunks">Choose…</button>
+    </div>
+  </section>
+
+  <label class="toggle">
+    <input type="checkbox" id="audio" checked />
+    <span><b>Include microphone audio</b><small>Adds the recorded audio to the video when it's available</small></span>
+  </label>
+  <label class="toggle">
+    <input type="checkbox" id="clean" />
+    <span><b>Delete raw chunks after stitching</b><small>Reclaims space automatically once a drive is rendered</small></span>
+  </label>
+
+  <div class="actions">
+    <button class="btn primary" id="syncBtn">⬇︎ Sync New</button>
+    <button class="btn danger hidden" id="stopBtn">◼ Stop</button>
+    <button class="btn" id="indexBtn">☰ Index Drives</button>
+  </div>
+
+  <div id="progress" class="progress hidden">
+    <div class="bar"><div class="fill" id="progFill"></div></div>
+    <div class="prow"><span id="progPct">0%</span><span id="progStatus"></span></div>
+  </div>
+
+  <pre id="log" class="log">Output will appear here…</pre>
+
+  <!-- Indexing Results sheet -->
+  <div id="sheet" class="sheet hidden">
+    <div class="sheetBox">
+      <div class="sheetHead">
+        <div>
+          <h2>Indexing Results</h2>
+          <p class="sub" id="sheetSub">Scanning this Mac and your comma…</p>
+        </div>
+        <button class="btn" id="closeSheet">Done</button>
+      </div>
+      <div class="selrow" id="selRow">
+        <label><input type="checkbox" id="selAll" /> Select all</label>
+        <span id="selCount" class="sub"></span>
+      </div>
+      <div id="driveList" class="drivelist"></div>
+      <div class="sheetFoot" id="sheetFoot">
+        <button class="btn" id="dlSelected">Download Selected</button>
+        <button class="btn primary" id="dlAll">Download All</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

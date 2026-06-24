@@ -21,3 +21,7 @@ macos-app/icon.icns
 
 # Go core build output
 core/comma-sync
+
+# Tauri build output
+gui/src-tauri/target/
+gui/src-tauri/gen/
