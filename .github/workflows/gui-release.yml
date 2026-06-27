@@ -56,6 +56,10 @@ jobs:
             **Beta** cross-platform GUI for Comma Sync (Linux + Windows).
             macOS users: keep using the native SwiftUI app from the main releases.
 
+            **New:** a built-in update check (on by default, toggle to disable) that
+            shows a banner when a newer beta is out — it reads only the public
+            releases list and sends no data. SHA-256 checksums are now published too.
+
             **Install**
             - **Linux:** download the `.AppImage` (`chmod +x` then run) or the `.deb`
               (`sudo apt install ./comma-sync*.deb`).
@@ -72,3 +76,18 @@ jobs:
             > on real Linux/Windows hardware. Please report what works and what doesn't.
           prerelease: true
           releaseDraft: false
+      - name: Publish SHA-256 checksums
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          out="$RUNNER_TEMP/SHA256SUMS-${{ runner.os }}.txt"
+          : > "$out"
+          find gui/src-tauri/target/release/bundle -type f \
+            \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \
+               -o -name '*.msi' -o -name '*setup.exe' \) -print0 |
+            while IFS= read -r -d '' f; do
+              ( cd "$(dirname "$f")" && sha256sum "$(basename "$f")" )
+            done >> "$out"
+          cat "$out"
+          gh release upload "${{ github.ref_name }}" "$out" --clobber -R "${{ github.repository }}"

@@ -77,6 +77,35 @@ fn list_drives(opts: Opts) -> Result<serde_json::Value, String> {
     serde_json::from_slice(&out.stdout).map_err(|e| format!("parsing list: {e}"))
 }
 
+/// Ask the core whether a newer GUI release exists (reads GitHub's public release
+/// list only; sends nothing). Returns {updateAvailable, latest, tag, url}.
+#[tauri::command]
+fn check_update(app: AppHandle) -> Result<serde_json::Value, String> {
+    let version = app.package_info().version.to_string();
+    let out = Command::new(core_bin())
+        .args([
+            "update-check", "--current", &version,
+            "--prefix", "gui-v", "--prereleases", "--json",
+        ])
+        .output()
+        .map_err(|e| format!("running core: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).into_owned());
+    }
+    serde_json::from_slice(&out.stdout).map_err(|e| format!("parsing update: {e}"))
+}
+
+/// Open a URL in the default browser (the update banner's Download button).
+#[tauri::command]
+fn open_url(url: String) {
+    #[cfg(target_os = "windows")]
+    let _ = Command::new("cmd").args(["/C", "start", "", &url]).spawn();
+    #[cfg(target_os = "macos")]
+    let _ = Command::new("open").arg(&url).spawn();
+    #[cfg(target_os = "linux")]
+    let _ = Command::new("xdg-open").arg(&url).spawn();
+}
+
 /// Run `sync` or `restitch …` and stream the core's --json events to the UI as
 /// `core-event` (stdout lines), `core-stderr`, and `core-done`.
 #[tauri::command]
@@ -130,6 +159,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             pick_folder,
             list_drives,
+            check_update,
+            open_url,
             start_job,
             cancel_job
         ])

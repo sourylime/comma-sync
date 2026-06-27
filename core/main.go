@@ -17,6 +17,7 @@ Usage:
   comma-sync list [--json]          List drives on this computer + still on the comma
   comma-sync sync [--json]          Download new drives and stitch them
   comma-sync restitch <route> [--json]   Re-stitch one drive (re-downloads if needed)
+  comma-sync update-check [--json]  Check GitHub for a newer release
   comma-sync version
 
 Env: ROOT, CHUNKS_DIR, COMMA_IP, REMOTE_PORT, SSH_KEY, WITH_AUDIO,
@@ -87,8 +88,11 @@ func main() {
 			fail(err)
 		}
 
+	case "update-check":
+		cmdUpdateCheck(os.Args[2:])
+
 	case "version":
-		fmt.Println("comma-sync core 0.2.0")
+		fmt.Println("comma-sync core " + coreVersion)
 
 	default:
 		usage()

@@ -8,6 +8,17 @@
 </head>
 <body>
   <main class="app">
+    <div id="updateBanner" class="banner hidden">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v11M7 10l5 5 5-5M5 20.5h14" /></svg>
+      <div class="bmeta">
+        <b id="updateTitle">Update available</b>
+        <small id="updateSub">A newer version is available.</small>
+      </div>
+      <button class="btn primary" id="updateGet">Download</button>
+      <button class="btn icon" id="updateClose" aria-label="Dismiss">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+      </button>
+    </div>
     <header class="hdr">
       <span class="logo" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
@@ -69,6 +80,15 @@
           <small>Reclaims space automatically once a drive is rendered</small>
         </span>
         <input type="checkbox" id="clean" />
+        <span class="switch" aria-hidden="true"></span>
+      </label>
+      <div class="divider"></div>
+      <label class="toggle">
+        <span class="tmeta">
+          <b>Automatically check for updates</b>
+          <small>Tells you when a newer version is on GitHub — only reads the public releases list, sends no data</small>
+        </span>
+        <input type="checkbox" id="autoUpdate" checked />
         <span class="switch" aria-hidden="true"></span>
       </label>
     </section>

@@ -190,3 +190,29 @@ function fmtSize(kb) {
 }
 
 refreshPaths();
+
+// ---- update check -----------------------------------------------------------
+// On by default; the core reads only GitHub's public releases list (no data sent).
+function autoUpdateOn() { return localStorage.getItem("autoUpdate") !== "0"; }
+
+async function checkUpdate() {
+  if (!autoUpdateOn()) { $("updateBanner").classList.add("hidden"); return; }
+  try {
+    const r = await invoke("check_update");
+    if (r && r.updateAvailable) {
+      $("updateSub").textContent = `${r.tag} is out — you're on ${r.current}.`;
+      $("updateGet").onclick = () => invoke("open_url", { url: r.url });
+      $("updateBanner").classList.remove("hidden");
+    }
+  } catch (_) { /* offline or rate-limited — ignore */ }
+}
+
+$("autoUpdate").checked = autoUpdateOn();
+$("autoUpdate").addEventListener("change", (e) => {
+  localStorage.setItem("autoUpdate", e.target.checked ? "1" : "0");
+  if (e.target.checked) checkUpdate(); else $("updateBanner").classList.add("hidden");
+});
+$("updateClose").addEventListener("click", () => $("updateBanner").classList.add("hidden"));
+
+checkUpdate();
+setInterval(checkUpdate, 12 * 60 * 60 * 1000);   // re-check every 12h while left open
