@@ -1,0 +1,74 @@
+name: GUI Release
+
+# Push a tag like `gui-v1.0.0-beta.1` to build the Linux + Windows installers and
+# publish them as a GitHub PRE-RELEASE (beta). Pre-releases are never marked
+# "latest", so this never shadows the macOS app's stable releases on main.
+on:
+  push:
+    tags:
+      - 'gui-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & publish installers (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux system deps (webkit2gtk etc.)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            librsvg2-dev patchelf libayatana-appindicator3-dev
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gui/src-tauri
+      - name: Build the Go core as a Tauri sidecar
+        shell: bash
+        working-directory: core
+        run: |
+          triple="$(rustc -vV | sed -n 's/^host: //p')"
+          ext=""; [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
+          mkdir -p ../gui/src-tauri/binaries
+          go build -trimpath -ldflags "-s -w" \
+            -o "../gui/src-tauri/binaries/comma-sync-${triple}${ext}" .
+      - name: Build installers and publish the pre-release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: gui/src-tauri
+          tagName: ${{ github.ref_name }}
+          releaseName: "Comma Sync GUI ${{ github.ref_name }} — Linux/Windows beta"
+          releaseBody: |
+            **Beta** cross-platform GUI for Comma Sync (Linux + Windows).
+            macOS users: keep using the native SwiftUI app from the main releases.
+
+            **Install**
+            - **Linux:** download the `.AppImage` (`chmod +x` then run) or the `.deb`
+              (`sudo apt install ./comma-sync*.deb`).
+            - **Windows:** run the `.msi` (or the NSIS `*-setup.exe`).
+
+            **One requirement:** `ffmpeg`/`ffprobe` on your PATH — the core shells out
+            to them for stitching. Everything else (SSH transfer, device discovery) is
+            built in, no rsync/ssh needed.
+            (`sudo apt install ffmpeg` / `winget install Gyan.FFmpeg`.)
+
+            See the [GUI README](https://github.com/sourylime/comma-sync/blob/tauri-gui/gui/README.md).
+
+            > ⚠️ Pre-release for testing — not yet verified end-to-end against a comma
+            > on real Linux/Windows hardware. Please report what works and what doesn't.
+          prerelease: true
+          releaseDraft: false

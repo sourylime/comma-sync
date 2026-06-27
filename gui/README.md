@@ -1,8 +1,12 @@
 # Comma Sync GUI (Tauri) — WORK IN PROGRESS
 
-A cross-platform desktop front-end (Linux + Windows; could replace the macOS
-SwiftUI app too) that drives the [`core`](../core) `comma-sync` binary and renders
-its `--json` progress stream. See [../ROADMAP.md](../ROADMAP.md), Phase 2.
+A desktop front-end for **Linux and Windows** that drives the [`core`](../core)
+`comma-sync` binary and renders its `--json` progress stream. See
+[../ROADMAP.md](../ROADMAP.md), Phase 2.
+
+> **macOS keeps its native SwiftUI app** ([`../macos-app`](../macos-app)) — it
+> looks and feels nicer than a web view, so this Tauri GUI deliberately targets
+> only Linux and Windows. The UI here mirrors the SwiftUI app's layout and style.
 
 Built on a **separate branch** — `main` is untouched until this is tested on all
 three OSes.

@@ -124,7 +124,7 @@ function batch(routes) {
 // ---- indexing sheet ---------------------------------------------------------
 async function openSheet() {
   $("sheet").classList.remove("hidden");
-  $("sheetSub").textContent = "Indexing this Mac and your comma…";
+  $("sheetSub").textContent = "Indexing this computer and your comma…";
   $("driveList").innerHTML = "<p class='sub' style='text-align:center'>Scanning…</p>";
   try {
     drives = await invoke("list_drives", { opts: opts() });
@@ -137,7 +137,7 @@ async function openSheet() {
 
 function renderDrives() {
   const total = drives.reduce((a, d) => a + (d.sizeKB || 0), 0);
-  $("sheetSub").textContent = `${drives.length} drives · ${fmtSize(total)} total — on this Mac and still on the comma`;
+  $("sheetSub").textContent = `${drives.length} drives · ${fmtSize(total)} total — on this computer and still on the comma`;
   const list = $("driveList");
   list.innerHTML = "";
   for (const d of drives) {
@@ -151,7 +151,7 @@ function renderDrives() {
         <div class="dname">${d.stamp}</div>
         <div class="dsub">${(d.cameras || []).join(", ")}${audio} · ${fmtSize(d.sizeKB)} · ${d.segments} min</div>
       </div>
-      <span class="badge">${onComma ? "on comma" : "on Mac"}</span>
+      <span class="badge">${onComma ? "on comma" : "local"}</span>
       <span class="status"></span>`;
     list.appendChild(row);
     rowByRoute[d.route] = row;

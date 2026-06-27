@@ -7,55 +7,94 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header class="hdr">
-    <div class="logo">🚗</div>
-    <div>
-      <h1>Comma Sync</h1>
-      <p class="sub">Pull new drives off your comma and stitch them into videos</p>
-    </div>
-  </header>
-
-  <section class="card">
-    <div class="frow">
-      <div class="ficon">🎞️</div>
-      <div class="fmeta">
-        <div class="ftitle">Stitched videos</div>
-        <div class="fpath" id="outPath">Not set</div>
+  <main class="app">
+    <header class="hdr">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 13.5l1.8-5A2.4 2.4 0 0 1 7.1 7h9.8a2.4 2.4 0 0 1 2.3 1.5l1.8 5" />
+          <path d="M2.5 13.5h19V18a1 1 0 0 1-1 1h-1.6a1 1 0 0 1-1-1v-1H7.1v1a1 1 0 0 1-1 1H4.5a1 1 0 0 1-1-1z" />
+          <path d="M6.8 16h.01M17.2 16h.01" />
+        </svg>
+      </span>
+      <div class="htext">
+        <h1>Comma Sync</h1>
+        <p class="sub">Pull new drives off your comma and stitch them into videos</p>
       </div>
-      <button class="btn" data-pick="out">Choose…</button>
-    </div>
-    <div class="divider"></div>
-    <div class="frow">
-      <div class="ficon">📦</div>
-      <div class="fmeta">
-        <div class="ftitle">Raw HEVC chunks</div>
-        <div class="fpath" id="chunkPath">Not set</div>
+    </header>
+
+    <section class="card">
+      <div class="frow">
+        <span class="ficon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="5" width="18" height="14" rx="2.4" />
+            <path d="M7.5 5v14M16.5 5v14M3 9.5h4.5M3 14.5h4.5M16.5 9.5H21M16.5 14.5H21" />
+          </svg>
+        </span>
+        <div class="fmeta">
+          <div class="ftitle">Stitched videos</div>
+          <div class="fpath" id="outPath">Not set</div>
+        </div>
+        <button class="btn" data-pick="out">Choose…</button>
       </div>
-      <button class="btn" data-pick="chunks">Choose…</button>
+      <div class="divider"></div>
+      <div class="frow">
+        <span class="ficon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 8.2l-9-4.9-9 4.9 9 4.9 9-4.9z" />
+            <path d="M3 8.2V16l9 4.9 9-4.9V8.2" />
+            <path d="M12 13.1v7.8" />
+          </svg>
+        </span>
+        <div class="fmeta">
+          <div class="ftitle">Raw HEVC chunks</div>
+          <div class="fpath" id="chunkPath">Not set</div>
+        </div>
+        <button class="btn" data-pick="chunks">Choose…</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <label class="toggle">
+        <span class="tmeta">
+          <b>Include microphone audio</b>
+          <small>Adds the recorded audio to the video when it's available</small>
+        </span>
+        <input type="checkbox" id="audio" checked />
+        <span class="switch" aria-hidden="true"></span>
+      </label>
+      <div class="divider"></div>
+      <label class="toggle">
+        <span class="tmeta">
+          <b>Delete raw chunks after stitching</b>
+          <small>Reclaims space automatically once a drive is rendered</small>
+        </span>
+        <input type="checkbox" id="clean" />
+        <span class="switch" aria-hidden="true"></span>
+      </label>
+    </section>
+
+    <div class="actions">
+      <button class="btn primary" id="syncBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v11M7 10l5 5 5-5M5 20.5h14" /></svg>
+        Sync New
+      </button>
+      <button class="btn danger hidden" id="stopBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6.5" y="6.5" width="11" height="11" rx="2.4" /></svg>
+        Stop
+      </button>
+      <button class="btn" id="indexBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h12M9 12h12M9 18h12" /><path d="M4 6h.01M4 12h.01M4 18h.01" /></svg>
+        Index Drives
+      </button>
     </div>
-  </section>
 
-  <label class="toggle">
-    <input type="checkbox" id="audio" checked />
-    <span><b>Include microphone audio</b><small>Adds the recorded audio to the video when it's available</small></span>
-  </label>
-  <label class="toggle">
-    <input type="checkbox" id="clean" />
-    <span><b>Delete raw chunks after stitching</b><small>Reclaims space automatically once a drive is rendered</small></span>
-  </label>
+    <div id="progress" class="progress hidden">
+      <div class="bar"><div class="fill" id="progFill"></div></div>
+      <div class="prow"><span id="progPct">0%</span><span id="progStatus"></span></div>
+    </div>
 
-  <div class="actions">
-    <button class="btn primary" id="syncBtn">⬇︎ Sync New</button>
-    <button class="btn danger hidden" id="stopBtn">◼ Stop</button>
-    <button class="btn" id="indexBtn">☰ Index Drives</button>
-  </div>
-
-  <div id="progress" class="progress hidden">
-    <div class="bar"><div class="fill" id="progFill"></div></div>
-    <div class="prow"><span id="progPct">0%</span><span id="progStatus"></span></div>
-  </div>
-
-  <pre id="log" class="log">Output will appear here…</pre>
+    <pre id="log" class="log">Output will appear here…</pre>
+  </main>
 
   <!-- Indexing Results sheet -->
   <div id="sheet" class="sheet hidden">
@@ -63,12 +102,12 @@
       <div class="sheetHead">
         <div>
           <h2>Indexing Results</h2>
-          <p class="sub" id="sheetSub">Scanning this Mac and your comma…</p>
+          <p class="sub" id="sheetSub">Scanning this computer and your comma…</p>
         </div>
         <button class="btn" id="closeSheet">Done</button>
       </div>
       <div class="selrow" id="selRow">
-        <label><input type="checkbox" id="selAll" /> Select all</label>
+        <label class="check"><input type="checkbox" id="selAll" /> Select all</label>
         <span id="selCount" class="sub"></span>
       </div>
       <div id="driveList" class="drivelist"></div>
