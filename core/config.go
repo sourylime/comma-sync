@@ -56,6 +56,27 @@ func skipLatest() bool { return envOr("SKIP_LATEST", "1") != "0" }
 func useUSB() bool     { return os.Getenv("USE_USB") == "1" }
 func fps() string      { return envOr("FPS", "20") }
 
+// bwLimitBytesPerSec parses BWLIMIT ("3m" = 3 MB/s, "500k", bare = KB/s) to bytes/sec;
+// 0 = unlimited. Throttling lowers the comma's power draw on weak supplies.
+func bwLimitBytesPerSec() int64 {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("BWLIMIT")))
+	if v == "" {
+		return 0
+	}
+	mult := int64(1024) // bare number = KB/s (rsync convention)
+	switch {
+	case strings.HasSuffix(v, "m"):
+		mult, v = 1024*1024, strings.TrimSuffix(v, "m")
+	case strings.HasSuffix(v, "k"):
+		mult, v = 1024, strings.TrimSuffix(v, "k")
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+	if err != nil || f <= 0 {
+		return 0
+	}
+	return int64(f * float64(mult))
+}
+
 func minAgeSecs() int64 {
 	if n, err := strconv.ParseInt(envOr("MIN_AGE_SECS", "120"), 10, 64); err == nil {
 		return n

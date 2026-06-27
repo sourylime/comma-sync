@@ -1,14 +1,63 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 )
+
+// discoverMDNS finds the comma by name via mDNS — no subnet scan, gentle on weak
+// WiFi, and it keeps working when the DHCP IP changes. The comma's avahi advertises
+// an _ssh._tcp service named like "comma SSH - tizi - [comma-XXXX]". Returns its
+// .local hostname, or "" if not found / no mDNS tool is available.
+func discoverMDNS() string {
+	if path, err := exec.LookPath("dns-sd"); err == nil { // macOS
+		cmd := exec.Command(path, "-B", "_ssh._tcp", "local")
+		stdout, err := cmd.StdoutPipe()
+		if err != nil || cmd.Start() != nil {
+			return ""
+		}
+		re := regexp.MustCompile(`\[(comma-[A-Za-z0-9]+)\]`)
+		found := make(chan string, 1)
+		go func() {
+			sc := bufio.NewScanner(stdout)
+			for sc.Scan() {
+				if m := re.FindStringSubmatch(sc.Text()); m != nil {
+					found <- m[1]
+					return
+				}
+			}
+			found <- ""
+		}()
+		var host string
+		select {
+		case host = <-found:
+		case <-time.After(2 * time.Second):
+		}
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		if host != "" {
+			return host + ".local"
+		}
+	} else if path, err := exec.LookPath("avahi-browse"); err == nil { // Linux
+		out, _ := exec.Command(path, "-rtp", "_ssh._tcp").Output()
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.HasPrefix(line, "=") && strings.Contains(strings.ToLower(line), "comma") {
+				if f := strings.Split(line, ";"); len(f) >= 7 {
+					return f[6]
+				}
+			}
+		}
+	}
+	return ""
+}
 
 func portOpen(host string, port int, timeout time.Duration) bool {
 	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, fmt.Sprint(port)), timeout)
@@ -60,6 +109,19 @@ func discover() (string, error) {
 			cacheIP(ip)
 			return ip, nil
 		}
+	}
+
+	// Preferred: mDNS by name — no subnet scan, survives DHCP changes.
+	if host := discoverMDNS(); host != "" && isComma(host, port) {
+		cacheIP(host)
+		fmt.Fprintf(os.Stderr, "==> Comma found via mDNS (%s)\n", host)
+		return host, nil
+	}
+
+	// AUTO_DISCOVER=0 skips the subnet scan (which can disrupt weak WiFi) — only
+	// COMMA_IP / cache / mDNS are used. Matches comma-sync.sh.
+	if os.Getenv("AUTO_DISCOVER") == "0" {
+		return "", fmt.Errorf("comma not found (AUTO_DISCOVER off; set COMMA_IP or use mDNS)")
 	}
 
 	local := localIPv4()

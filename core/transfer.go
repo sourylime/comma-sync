@@ -43,6 +43,27 @@ func (c countWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
+// throttleWriter caps throughput to rate bytes/sec (0 = unlimited) by sleeping —
+// BWLIMIT uses it to lower the comma's power draw on a weak supply.
+type throttleWriter struct {
+	w       io.Writer
+	rate    int64
+	written int64
+	start   time.Time
+}
+
+func (t *throttleWriter) Write(b []byte) (int, error) {
+	n, err := t.w.Write(b)
+	if t.rate > 0 {
+		t.written += int64(n)
+		want := float64(t.written) / float64(t.rate)
+		if got := time.Since(t.start).Seconds(); want > got {
+			time.Sleep(time.Duration((want - got) * float64(time.Second)))
+		}
+	}
+	return n, err
+}
+
 func wantFile(name string) bool {
 	return strings.HasSuffix(name, ".hevc") || name == "qcamera.ts"
 }
@@ -141,7 +162,11 @@ func pullFile(sc *sftp.Client, rpath, lpath string, size int64, mtime time.Time,
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(countWriter{lf, pc}, rf)
+	var dst io.Writer = lf
+	if rate := bwLimitBytesPerSec(); rate > 0 {
+		dst = &throttleWriter{w: lf, rate: rate, start: time.Now()}
+	}
+	_, err = io.Copy(countWriter{dst, pc}, rf)
 	lf.Close()
 	if err != nil {
 		return err

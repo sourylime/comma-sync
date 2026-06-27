@@ -7,8 +7,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
+
+const audioRate = 16000 // comma mic: 16 kHz mono
 
 func localSegs(route string) []string {
 	entries, _ := os.ReadDir(chunksDir())
@@ -128,15 +131,118 @@ func concatFiles(dir string, segs []string, fname, pattern string) (string, bool
 	return tmp.Name(), any, nil
 }
 
-func muxToMP4(combinedHEVC, audioPath, out string) error {
-	args := []string{"-y", "-loglevel", "error", "-framerate", fps(), "-i", combinedHEVC}
-	if audioPath != "" {
-		args = append(args, "-i", audioPath, "-map", "0:v:0", "-map", "1:a:0",
-			"-c:v", "copy", "-c:a", "copy", "-tag:v", "hvc1", out)
-	} else {
-		args = append(args, "-c", "copy", "-tag:v", "hvc1", out)
+// countPackets returns the video frame count of an HEVC/MP4 file (cheap; no decode).
+func countPackets(path string) int {
+	out, err := exec.Command("ffprobe", "-v", "error", "-select_streams", "v",
+		"-count_packets", "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", path).Output()
+	if err != nil {
+		return 0
 	}
-	return exec.Command("ffmpeg", args...).Run()
+	n, _ := strconv.Atoi(strings.TrimSpace(string(out)))
+	return n
+}
+
+func fpsFloat() float64 {
+	if f, err := strconv.ParseFloat(fps(), 64); err == nil && f > 0 {
+		return f
+	}
+	return 20
+}
+
+// segFirstHEVC returns a camera .hevc filename present in a segment (any camera —
+// they share the same frame count), or "" if the segment has none.
+func segFirstHEVC(segPath string) string {
+	files, _ := os.ReadDir(segPath)
+	for _, f := range files {
+		if strings.HasSuffix(f.Name(), ".hevc") {
+			return f.Name()
+		}
+	}
+	return ""
+}
+
+// buildAudioPCM builds a 16 kHz mono PCM track locked to the video. The comma's mic
+// starts a few seconds AFTER the camera at the start of a drive (the first qcamera.ts
+// has a leading gap), so each segment's audio is decoded *preserving its timing*
+// (aresample fills the gap with silence) and fit to that segment's exact video
+// length, so audio and video realign at every segment boundary instead of drifting.
+// Segments with no audio get silence. Returns the PCM path ("" if no audio) + its dur.
+func buildAudioPCM(dir string, segs []string) (string, float64) {
+	out, err := os.CreateTemp("", "comma_aud_*.pcm")
+	if err != nil {
+		return "", 0
+	}
+	hadAudio := false
+	for _, s := range segs {
+		segPath := filepath.Join(dir, s)
+		hevc := segFirstHEVC(segPath)
+		if hevc == "" {
+			continue
+		}
+		frames := countPackets(filepath.Join(segPath, hevc))
+		if frames <= 0 {
+			continue
+		}
+		segDur := float64(frames) / fpsFloat()
+		tbytes := int64(segDur*float64(audioRate)+0.5) * 2
+		var wrote int64
+		qts := filepath.Join(segPath, "qcamera.ts")
+		if _, err := os.Stat(qts); err == nil {
+			tmp, _ := os.CreateTemp("", "comma_seg_*.pcm")
+			tmpName := tmp.Name()
+			tmp.Close()
+			cmd := exec.Command("ffmpeg", "-y", "-v", "error", "-i", qts,
+				"-map", "0:a:0", "-af", "aresample=async=1:first_pts=0,apad",
+				"-t", fmt.Sprintf("%.4f", segDur), "-ar", strconv.Itoa(audioRate),
+				"-ac", "1", "-f", "s16le", tmpName)
+			if cmd.Run() == nil {
+				if data, err := os.ReadFile(tmpName); err == nil && len(data) > 0 {
+					hadAudio = true
+					if int64(len(data)) > tbytes {
+						data = data[:tbytes]
+					}
+					out.Write(data)
+					wrote = int64(len(data))
+				}
+			}
+			os.Remove(tmpName)
+		}
+		if wrote < tbytes {
+			out.Write(make([]byte, tbytes-wrote)) // pad with silence to keep sync
+		}
+	}
+	out.Close()
+	if !hadAudio {
+		os.Remove(out.Name())
+		return "", 0
+	}
+	st, _ := os.Stat(out.Name())
+	return out.Name(), float64(st.Size()/2) / float64(audioRate)
+}
+
+// muxCamera writes one camera's MP4. With audio it stretches the PCM to exactly fill
+// this camera's video (atempo) so the totals line up, and re-encodes to AAC (copying
+// the concatenated-TS audio fails with "sample rate not set").
+func muxCamera(combinedHEVC, audioPCM string, audioDur float64, out string) error {
+	if audioPCM == "" {
+		return exec.Command("ffmpeg", "-y", "-loglevel", "error",
+			"-framerate", fps(), "-i", combinedHEVC, "-c", "copy", "-tag:v", "hvc1", out).Run()
+	}
+	vdur := float64(countPackets(combinedHEVC)) / fpsFloat()
+	tempo := 1.0
+	if vdur > 0 {
+		if tempo = audioDur / vdur; tempo < 0.5 {
+			tempo = 0.5
+		} else if tempo > 2.0 {
+			tempo = 2.0
+		}
+	}
+	return exec.Command("ffmpeg", "-y", "-loglevel", "error",
+		"-framerate", fps(), "-i", combinedHEVC,
+		"-f", "s16le", "-ar", strconv.Itoa(audioRate), "-ac", "1", "-i", audioPCM,
+		"-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",
+		"-filter:a", fmt.Sprintf("atempo=%.6f", tempo),
+		"-c:a", "aac", "-b:a", "96k", "-tag:v", "hvc1", out).Run()
 }
 
 // stitchRoute mirrors stitch_route() in comma-sync.sh: concat each camera's HEVC,
@@ -162,14 +268,10 @@ func stitchRoute(route string, collision bool) error {
 	}
 	emit(ProgressEvent{Type: "drive", Route: route, Message: fmt.Sprintf("Stitching drive %s  ->  %s%s", route, stamp, suffix)})
 
-	audioPath := ""
+	audioPCM, audioDur := "", 0.0
 	if withAudio() {
-		ts, any, err := concatFiles(dir, segs, "qcamera.ts", "comma_aud_*.ts")
-		if err == nil && any && hasAudioFile(ts) {
-			audioPath = ts
-			defer os.Remove(audioPath)
-		} else {
-			os.Remove(ts)
+		if audioPCM, audioDur = buildAudioPCM(dir, segs); audioPCM != "" {
+			defer os.Remove(audioPCM)
 		}
 	}
 
@@ -184,12 +286,12 @@ func stitchRoute(route string, collision bool) error {
 			continue
 		}
 		emit(ProgressEvent{Type: "progress", Route: route, Phase: "stitch", Percent: 0})
-		if err := muxToMP4(combined, audioPath, out); err != nil {
+		if err := muxCamera(combined, audioPCM, audioDur, out); err != nil {
 			emit(ProgressEvent{Type: "error", Route: route, Message: "ffmpeg failed for " + lbl})
 			ok = false
 		} else {
 			tag := ""
-			if audioPath != "" {
+			if audioPCM != "" {
 				tag = " +audio"
 			}
 			logf("      %s%s: %s", lbl, tag, filepath.Base(out))
