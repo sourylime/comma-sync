@@ -424,40 +424,34 @@ struct ContentView: View {
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0"
     }
 
-    // Ask GitHub for the latest *stable* release (the API skips pre-releases, so the
-    // Linux/Windows GUI beta never shows up here). If it's newer than this build,
-    // surface the banner. Read-only, sends nothing about the user.
+    // Ask the bundled core whether a newer Go-core beta is out — it checks the
+    // gui-v* pre-releases (where this build lives), so testers are pointed at the
+    // next beta, not the stable script-based app. Read-only; sends no user data.
     private func checkForUpdate() {
         guard autoUpdateCheck else { return }
-        guard let url = URL(string: "https://api.github.com/repos/sourylime/comma-sync/releases/latest") else { return }
-        var req = URLRequest(url: url, timeoutInterval: 8)
-        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        URLSession.shared.dataTask(with: req) { data, _, _ in
-            guard let data,
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let tag = obj["tag_name"] as? String,
-                  let html = obj["html_url"] as? String else { return }
-            let remote = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
-            guard versionGreater(remote, than: appVersion) else { return }
+        let core = scriptPath
+        let version = appVersion
+        DispatchQueue.global().async {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: core)
+            p.arguments = ["update-check", "--current", version, "--prefix", "gui-v", "--prereleases", "--json"]
+            var env = ProcessInfo.processInfo.environment
+            env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+            p.environment = env
+            let out = Pipe()
+            p.standardOutput = out
+            p.standardError = Pipe()
+            do { try p.run() } catch { return }
+            let data = out.fileHandleForReading.readDataToEndOfFile()
+            p.waitUntilExit()
+            struct U: Decodable { let updateAvailable: Bool; let tag: String?; let url: String? }
+            guard let u = try? JSONDecoder().decode(U.self, from: data),
+                  u.updateAvailable, let tag = u.tag, let url = u.url else { return }
             DispatchQueue.main.async {
                 updateVersion = tag
-                updateURL = html
+                updateURL = url
             }
-        }.resume()
-    }
-
-    // Compare dotted numeric versions (1.0.3 > 1.0.2), ignoring any non-numeric suffix.
-    private func versionGreater(_ a: String, than b: String) -> Bool {
-        func nums(_ s: String) -> [Int] {
-            s.split(separator: ".").map { Int($0.prefix { $0.isNumber }) ?? 0 }
         }
-        let x = nums(a), y = nums(b)
-        for i in 0..<max(x.count, y.count) {
-            let xi = i < x.count ? x[i] : 0
-            let yi = i < y.count ? y[i] : 0
-            if xi != yi { return xi > yi }
-        }
-        return false
     }
 
     private func syncNow() {

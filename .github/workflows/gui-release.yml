@@ -51,29 +51,32 @@ jobs:
         with:
           projectPath: gui/src-tauri
           tagName: ${{ github.ref_name }}
-          releaseName: "Comma Sync GUI ${{ github.ref_name }} — Linux/Windows beta"
+          releaseName: "Comma Sync ${{ github.ref_name }} — Go core beta (all platforms)"
           releaseBody: |
-            **Beta** cross-platform GUI for Comma Sync (Linux + Windows).
-            macOS users: keep using the native SwiftUI app from the main releases.
+            **Beta builds powered by the new shared Go core** — the same engine across
+            macOS, Linux, and Windows (native SSH/SFTP + discovery; only `ffmpeg` is
+            external). The stable macOS app on `main` is unaffected.
 
-            **New:** a built-in update check (on by default, toggle to disable) that
-            shows a banner when a newer beta is out — it reads only the public
-            releases list and sends no data. SHA-256 checksums are now published too.
+            **What's here**
+            - **macOS:** `Comma-Sync-Go-macOS.zip` — the SwiftUI app wired to the Go core.
+            - **Linux:** `.AppImage` (`chmod +x` then run) or `.deb` (`sudo apt install ./*.deb`).
+            - **Windows:** the `.msi` (or NSIS `*-setup.exe`).
 
-            **Install**
-            - **Linux:** download the `.AppImage` (`chmod +x` then run) or the `.deb`
-              (`sudo apt install ./comma-sync*.deb`).
-            - **Windows:** run the `.msi` (or the NSIS `*-setup.exe`).
+            This round ports the script's fixes into the core: **correct per‑segment audio
+            sync** (no more drift / mic‑start gap), **mDNS discovery** (no WiFi‑disrupting
+            scan), and the **power‑throttle**. A built‑in update check (on by default,
+            toggle to disable) points you at the next beta. **SHA‑256 checksums** for every
+            file are attached (`*SHA256SUMS*`).
 
-            **One requirement:** `ffmpeg`/`ffprobe` on your PATH — the core shells out
-            to them for stitching. Everything else (SSH transfer, device discovery) is
-            built in, no rsync/ssh needed.
-            (`sudo apt install ffmpeg` / `winget install Gyan.FFmpeg`.)
+            **One requirement:** `ffmpeg`/`ffprobe` on your PATH.
+            (`brew install ffmpeg` / `sudo apt install ffmpeg` / `winget install Gyan.FFmpeg`.)
+            macOS/Windows are ad‑hoc/unsigned, so allow them on first launch (macOS: right‑click → Open).
 
             See the [GUI README](https://github.com/sourylime/comma-sync/blob/tauri-gui/gui/README.md).
 
-            > ⚠️ Pre-release for testing — not yet verified end-to-end against a comma
-            > on real Linux/Windows hardware. Please report what works and what doesn't.
+            > ⚠️ Pre-release for testing — the macOS build works in basic testing; Linux
+            > and Windows haven't been verified against a comma on real hardware yet.
+            > **Please test and report any bugs.**
           prerelease: true
           releaseDraft: false
       - name: Publish SHA-256 checksums
@@ -91,3 +94,26 @@ jobs:
             done >> "$out"
           cat "$out"
           gh release upload "${{ github.ref_name }}" "$out" --clobber -R "${{ github.repository }}"
+
+  macos-go-app:
+    name: Build macOS Go-core app
+    needs: release          # release job creates the GitHub release first
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Build the SwiftUI app on the Go core
+        run: |
+          v="${GITHUB_REF_NAME#gui-v}"; v="${v%%-*}"   # gui-v1.0.2-beta.1 -> 1.0.2
+          APP_VERSION="$v" bash macos-app-go/build.sh
+      - name: Package + checksum + upload
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent "Comma Sync Go.app" Comma-Sync-Go-macOS.zip
+          shasum -a 256 Comma-Sync-Go-macOS.zip > SHA256SUMS-macOS.txt
+          cat SHA256SUMS-macOS.txt
+          gh release upload "$GITHUB_REF_NAME" Comma-Sync-Go-macOS.zip SHA256SUMS-macOS.txt \
+            --clobber -R "${{ github.repository }}"
