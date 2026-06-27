@@ -25,3 +25,5 @@ core/comma-sync
 # Tauri build output
 gui/src-tauri/target/
 gui/src-tauri/gen/
+# Core sidecar binaries (built per-platform in CI / locally before a Tauri build)
+gui/src-tauri/binaries/

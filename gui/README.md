@@ -20,29 +20,43 @@ gui/
 
 The Rust side spawns the `comma-sync` core and forwards its events to the UI
 (`core-event` = JSON progress line, `core-stderr`, `core-done`). It finds the core
-via `$COMMA_SYNC_BIN`, then next to the app, then `PATH`.
+via `$COMMA_SYNC_BIN`, then next to the app, then `PATH`. In the packaged
+installers the core ships **bundled as a Tauri sidecar** right next to the app, so
+end users don't install it separately.
 
-## Prerequisites
+## Download & install (Linux / Windows)
 
-- Rust (`https://rustup.rs`) and the Tauri v2 system deps for your OS
-  (see https://tauri.app/start/prerequisites/ — on Linux: `webkit2gtk-4.1`, GTK,
-  librsvg, patchelf, appindicator).
-- The `comma-sync` **core** binary built (`cd ../core && go build -o comma-sync .`)
-  and on `PATH` or pointed to via `COMMA_SYNC_BIN`.
-- `ffmpeg`/`ffprobe` available (the core shells out to them).
+Every push to this branch builds installers in CI. Grab them from the latest
+**[Actions run](https://github.com/sourylime/comma-sync/actions)** → the
+`comma-sync-gui-ubuntu-latest` / `comma-sync-gui-windows-latest` artifacts:
 
-## Build & run (dev)
+- **Linux:** `.AppImage` (chmod +x and run) or `.deb` (`sudo apt install ./*.deb`).
+- **Windows:** `.msi` (or NSIS `*-setup.exe`).
+
+**One runtime dependency:** `ffmpeg`/`ffprobe` must be installed (the core shells
+out to them for stitching). Everything else — SSH/SFTP transfer, discovery — is
+native in the core, no `rsync`/`ssh` needed.
+
+- Linux: `sudo apt install ffmpeg` (Debian/Ubuntu) or `sudo dnf install ffmpeg`.
+- Windows: `winget install Gyan.FFmpeg` (or `choco install ffmpeg`), then reopen
+  your terminal so it's on `PATH`.
+
+## Build from source (dev)
+
+Prereqs: Rust (`https://rustup.rs`), Go, and the Tauri v2 system deps for your OS
+(see https://tauri.app/start/prerequisites/ — on Linux: `webkit2gtk-4.1`, GTK,
+librsvg, patchelf, appindicator), plus `ffmpeg`/`ffprobe` at runtime.
+
+Because the core is wired in as a sidecar (`externalBin`), build it for your
+machine **before** running/bundling the Tauri app:
 
 ```bash
 cargo install tauri-cli --version '^2'      # once
+triple="$(rustc -vV | sed -n 's/^host: //p')"
+( cd core && go build -o "../gui/src-tauri/binaries/comma-sync-$triple" . )   # .exe on Windows
 cd gui/src-tauri
-COMMA_SYNC_BIN=../../core/comma-sync cargo tauri dev
-```
-
-Release bundles (`.app`/`.dmg`, `.deb`/`.AppImage`, `.msi`):
-
-```bash
-cargo tauri build
+cargo tauri dev          # run it
+cargo tauri build        # or produce installers (.deb/.AppImage, .msi, .dmg)
 ```
 
 ## Status
@@ -52,14 +66,13 @@ cargo tauri build
 | Main window (folders, toggles, Sync/Stop/Index) | ✅ drafted |
 | Indexing Results sheet (list, select, Download All/Selected) | ✅ drafted |
 | Per-drive live progress from `--json` stream | ✅ drafted |
-| Compiles on Linux/macOS/Windows | ⏳ to verify in CI |
-| Core as a bundled **sidecar** (vs. PATH lookup) | 🔜 todo |
-| Full release bundling + icons (`tauri icon`) | 🔜 todo |
+| Core bundled as a Tauri **sidecar** | ✅ done |
+| CI builds Linux `.deb`/`.AppImage` + Windows `.msi` installers | ✅ done |
+| Real end-to-end test against a comma (Linux + Windows) | ⏳ in progress |
 
 ## TODO before merge
 
-1. Verify `cargo build`/`cargo tauri build` on all three OSes (CI).
-2. Bundle the core as a Tauri **sidecar** so users don't install it separately.
-3. Generate the full icon set (`cargo tauri icon icon.png`).
-4. Real end-to-end test against a comma on each OS.
-5. Process-group kill on cancel (so a killed core also stops its `ffmpeg`).
+1. Install the CI artifacts on a real Linux + Windows machine and verify the UI
+   launches, finds the comma, indexes, and stitches end-to-end.
+2. Process-group kill on cancel (so a killed core also stops its `ffmpeg`).
+3. Generate the full icon set (`cargo tauri icon icon.png`) for nicer platform icons.
