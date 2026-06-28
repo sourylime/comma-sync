@@ -95,6 +95,11 @@ final class SyncRunner: ObservableObject {
         env["CLEAN_RAW"] = cfg.del ? "1" : "0"
         env["WITH_AUDIO"] = cfg.audio ? "1" : "0"
         if cfg.limit { env["BWLIMIT"] = "3m" }   // throttle to ~3 MB/s for weak power sources
+        let ud = UserDefaults.standard            // combined multi-angle video options
+        env["WITH_COMBINED"] = ud.bool(forKey: "withCombined") ? "1" : "0"
+        env["PRIMARY_CAM"] = ud.string(forKey: "primaryCam") ?? "road"
+        env["SECONDARY_CAM"] = ud.string(forKey: "secondaryCam") ?? "wide"
+        env["TERTIARY_CAM"] = ud.string(forKey: "tertiaryCam") ?? "driver"
         p.environment = env
 
         let pipe = Pipe()
@@ -203,6 +208,10 @@ struct ContentView: View {
     @AppStorage("syncAudio") private var syncAudio = true
     @AppStorage("limitPower") private var limitPower = false
     @AppStorage("autoUpdateCheck") private var autoUpdateCheck = true
+    @AppStorage("withCombined") private var withCombined = false
+    @AppStorage("primaryCam") private var primaryCam = "road"
+    @AppStorage("secondaryCam") private var secondaryCam = "wide"
+    @AppStorage("tertiaryCam") private var tertiaryCam = "driver"
     @StateObject private var runner = SyncRunner()
     @State private var showDrives = false
     @State private var drives: [Drive] = []
@@ -285,6 +294,21 @@ struct ContentView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            Toggle(isOn: $withCombined) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Also make a combined multi-angle video")
+                    Text("One extra file with all cameras — 2 side by side, or 3 with the main angle on top and the other two below")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if withCombined {
+                HStack(spacing: 16) {
+                    camPicker("Primary (top)", $primaryCam)
+                    camPicker("Bottom-left", $secondaryCam)
+                    camPicker("Bottom-right", $tertiaryCam)
+                }
+                .padding(.leading, 2)
+            }
             Toggle(isOn: $autoUpdateCheck) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Automatically check for updates")
@@ -321,7 +345,7 @@ struct ContentView: View {
             logView
         }
         .padding(22)
-        .frame(width: 580, height: 712)
+        .frame(width: 580, height: 772)
         .onAppear {
             setDefaults()
             if drives.isEmpty { drives = loadCachedDrives() }
@@ -387,6 +411,19 @@ struct ContentView: View {
     }
 
     @ViewBuilder
+    private func camPicker(_ title: String, _ sel: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Picker("", selection: sel) {
+                Text("Road").tag("road")
+                Text("Wide").tag("wide")
+                Text("Driver").tag("driver")
+            }
+            .labelsHidden()
+            .frame(width: 110)
+        }
+    }
+
     private func folderRow(title: String, systemImage: String, path: Binding<String>) -> some View {
         HStack(spacing: 10) {
             Image(systemName: systemImage).foregroundStyle(.secondary).frame(width: 20)

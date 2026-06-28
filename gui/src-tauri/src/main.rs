@@ -23,6 +23,14 @@ struct Opts {
     clean: bool,
     #[serde(default)]
     use_usb: bool,
+    #[serde(default)]
+    combined: bool,
+    #[serde(default)]
+    primary: String,
+    #[serde(default)]
+    secondary: String,
+    #[serde(default)]
+    tertiary: String,
 }
 
 /// Locate the core binary: $COMMA_SYNC_BIN, then next to this app, then PATH.
@@ -54,6 +62,16 @@ fn core_command(opts: &Opts, args: &[&str]) -> Command {
     cmd.env("CLEAN_RAW", if opts.clean { "1" } else { "0" });
     if opts.use_usb {
         cmd.env("USE_USB", "1");
+    }
+    cmd.env("WITH_COMBINED", if opts.combined { "1" } else { "0" });
+    if !opts.primary.is_empty() {
+        cmd.env("PRIMARY_CAM", &opts.primary);
+    }
+    if !opts.secondary.is_empty() {
+        cmd.env("SECONDARY_CAM", &opts.secondary);
+    }
+    if !opts.tertiary.is_empty() {
+        cmd.env("TERTIARY_CAM", &opts.tertiary);
     }
     cmd
 }

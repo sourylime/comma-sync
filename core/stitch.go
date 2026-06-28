@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -245,6 +246,57 @@ func muxCamera(combinedHEVC, audioPCM string, audioDur float64, out string) erro
 		"-c:a", "aac", "-b:a", "96k", "-tag:v", "hvc1", out).Run()
 }
 
+// combineVideo builds one optional multi-angle MP4 from the per-camera MP4s in
+// outdir: 2 cams side by side at native aspect; 3 -> primary across the top 2/3,
+// secondary bottom-left, tertiary bottom-right. Roles from PRIMARY/SECONDARY/
+// TERTIARY_CAM (labels road|wide|driver); missing or duplicate roles are skipped,
+// and with fewer than 2 it does nothing. Re-encodes (HW on macOS); copies audio.
+func combineVideo(outdir, stamp, suffix string) {
+	seen := map[string]bool{}
+	var inputs []string
+	for _, r := range []string{primaryCam(), secondaryCam(), tertiaryCam()} {
+		if seen[r] {
+			continue
+		}
+		p := filepath.Join(outdir, stamp+"__"+r+suffix+".mp4")
+		if _, err := os.Stat(p); err == nil {
+			inputs = append(inputs, p)
+			seen[r] = true
+		}
+	}
+	if len(inputs) < 2 {
+		return
+	}
+
+	var fc string
+	if len(inputs) == 2 {
+		fc = "[0:v]scale=-2:1208[a];[1:v]scale=-2:1208[b];[a][b]hstack=inputs=2[v]"
+	} else {
+		fc = "[0:v]scale=1920:1200:force_original_aspect_ratio=decrease,pad=1920:1200:(ow-iw)/2:(oh-ih)/2[p];" +
+			"[1:v]scale=960:600:force_original_aspect_ratio=decrease,pad=960:600:(ow-iw)/2:(oh-ih)/2[s];" +
+			"[2:v]scale=960:600:force_original_aspect_ratio=decrease,pad=960:600:(ow-iw)/2:(oh-ih)/2[t];" +
+			"color=c=black:s=1920x1800:r=" + fps() + "[bg];[bg][p]overlay=0:0[b1];[b1][s]overlay=0:1200[b2];[b2][t]overlay=960:1200:shortest=1[v]"
+	}
+
+	out := filepath.Join(outdir, stamp+"__combined"+suffix+".mp4")
+	args := []string{"-y", "-loglevel", "error"}
+	for _, p := range inputs {
+		args = append(args, "-i", p)
+	}
+	args = append(args, "-filter_complex", fc, "-map", "[v]", "-map", "0:a?")
+	if runtime.GOOS == "darwin" {
+		args = append(args, "-c:v", "h264_videotoolbox", "-b:v", "14M")
+	} else {
+		args = append(args, "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p")
+	}
+	args = append(args, "-c:a", "copy", "-movflags", "+faststart", out)
+	if err := exec.Command("ffmpeg", args...).Run(); err != nil {
+		emit(ProgressEvent{Type: "error", Message: "combined video failed for " + stamp})
+	} else {
+		logf("      combined (%d cams): %s", len(inputs), filepath.Base(out))
+	}
+}
+
 // stitchRoute mirrors stitch_route() in comma-sync.sh: concat each camera's HEVC,
 // mux microphone audio from qcamera.ts when present, collision-safe when asked.
 func stitchRoute(route string, collision bool) error {
@@ -262,6 +314,28 @@ func stitchRoute(route string, collision bool) error {
 	if err := os.MkdirAll(outdir, 0o755); err != nil {
 		return err
 	}
+
+	// If the per-camera videos are already in the output folder, reuse them for the
+	// combined video instead of re-rendering everything.
+	if withCombined() {
+		allExist := true
+		for _, cam := range cams {
+			if _, err := os.Stat(filepath.Join(outdir, stamp+"__"+labelFor(cam)+".mp4")); err != nil {
+				allExist = false
+				break
+			}
+		}
+		if allExist {
+			if _, err := os.Stat(filepath.Join(outdir, stamp+"__combined.mp4")); err == nil {
+				logf("==> %s: individual + combined videos already exist — nothing to do", stamp)
+				return nil
+			}
+			logf("==> %s: using the existing individual videos for the combined (no re-render)", stamp)
+			combineVideo(outdir, stamp, "")
+			return nil
+		}
+	}
+
 	suffix := ""
 	if collision {
 		suffix = collisionSuffix(outdir, stamp, cams)
@@ -297,6 +371,9 @@ func stitchRoute(route string, collision bool) error {
 			logf("      %s%s: %s", lbl, tag, filepath.Base(out))
 		}
 		os.Remove(combined)
+	}
+	if ok && withCombined() {
+		combineVideo(outdir, stamp, suffix)
 	}
 	if !ok {
 		return fmt.Errorf("stitch failed for %s", route)

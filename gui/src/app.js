@@ -23,6 +23,10 @@ function opts() {
     audio: $("audio").checked,
     clean: $("clean").checked,
     use_usb: false,
+    combined: $("combined").checked,
+    primary: $("primaryCam").value,
+    secondary: $("secondaryCam").value,
+    tertiary: $("tertiaryCam").value,
   };
 }
 
@@ -190,6 +194,21 @@ function fmtSize(kb) {
 }
 
 refreshPaths();
+
+// ---- combined multi-angle video controls ------------------------------------
+function syncCombinedUI() { $("combinedRoles").classList.toggle("hidden", !$("combined").checked); }
+$("combined").checked = localStorage.getItem("combined") === "1";
+$("primaryCam").value = localStorage.getItem("primaryCam") || "road";
+$("secondaryCam").value = localStorage.getItem("secondaryCam") || "wide";
+$("tertiaryCam").value = localStorage.getItem("tertiaryCam") || "driver";
+syncCombinedUI();
+$("combined").addEventListener("change", (e) => {
+  localStorage.setItem("combined", e.target.checked ? "1" : "0");
+  syncCombinedUI();
+});
+for (const id of ["primaryCam", "secondaryCam", "tertiaryCam"]) {
+  $(id).addEventListener("change", (e) => localStorage.setItem(id, e.target.value));
+}
 
 // ---- update check -----------------------------------------------------------
 // On by default; the core reads only GitHub's public releases list (no data sent).

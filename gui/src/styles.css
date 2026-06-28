@@ -188,6 +188,14 @@ body {
 .btn.icon { padding: 7px; }
 .btn.icon svg { width: 15px; height: 15px; }
 
+/* ---- combined-video role pickers ---- */
+.roles { display: flex; gap: 16px; padding: 2px 2px 12px; }
+.role { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--gray); }
+.role select {
+  font: inherit; font-size: 13px; padding: 5px 9px; border-radius: 8px;
+  border: 0.5px solid var(--border); background: var(--card); color: var(--ink);
+}
+
 .hidden { display: none !important; }
 
 /* ---- indexing sheet ---- */

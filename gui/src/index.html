@@ -91,6 +91,20 @@
         <input type="checkbox" id="autoUpdate" checked />
         <span class="switch" aria-hidden="true"></span>
       </label>
+      <div class="divider"></div>
+      <label class="toggle">
+        <span class="tmeta">
+          <b>Also make a combined multi-angle video</b>
+          <small>One extra file with all cameras — 2 side by side, or 3 with the main angle on top and the other two below</small>
+        </span>
+        <input type="checkbox" id="combined" />
+        <span class="switch" aria-hidden="true"></span>
+      </label>
+      <div id="combinedRoles" class="roles hidden">
+        <label class="role">Primary (top)<select id="primaryCam"><option value="road">Road</option><option value="wide">Wide</option><option value="driver">Driver</option></select></label>
+        <label class="role">Bottom-left<select id="secondaryCam"><option value="road">Road</option><option value="wide">Wide</option><option value="driver">Driver</option></select></label>
+        <label class="role">Bottom-right<select id="tertiaryCam"><option value="road">Road</option><option value="wide">Wide</option><option value="driver">Driver</option></select></label>
+      </div>
     </section>
 
     <div class="actions">

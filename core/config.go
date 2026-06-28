@@ -28,6 +28,12 @@ func ipCachePath() string { return filepath.Join(rootDir(), ".last_ip") }
 func ledgerPath() string  { return filepath.Join(rootDir(), ".processed_routes") }
 func withAudio() bool     { return envOr("WITH_AUDIO", "1") != "0" }
 
+// Combined multi-angle video: roles by label (road|wide|driver).
+func withCombined() bool   { return os.Getenv("WITH_COMBINED") == "1" }
+func primaryCam() string   { return envOr("PRIMARY_CAM", "road") }
+func secondaryCam() string { return envOr("SECONDARY_CAM", "wide") }
+func tertiaryCam() string  { return envOr("TERTIARY_CAM", "driver") }
+
 func commaPort() int {
 	if n, err := strconv.Atoi(os.Getenv("REMOTE_PORT")); err == nil && n > 0 {
 		return n

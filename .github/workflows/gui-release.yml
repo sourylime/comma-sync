@@ -62,11 +62,13 @@ jobs:
             - **Linux:** `.AppImage` (`chmod +x` then run) or `.deb` (`sudo apt install ./*.deb`).
             - **Windows:** the `.msi` (or NSIS `*-setup.exe`).
 
-            This round ports the script's fixes into the core: **correct per‑segment audio
-            sync** (no more drift / mic‑start gap), **mDNS discovery** (no WiFi‑disrupting
-            scan), and the **power‑throttle**. A built‑in update check (on by default,
-            toggle to disable) points you at the next beta. **SHA‑256 checksums** for every
-            file are attached (`*SHA256SUMS*`).
+            This round ports all the script's fixes into the core: **correct per‑segment
+            audio sync** (no more drift / mic‑start gap), **mDNS discovery** (no
+            WiFi‑disrupting scan), the **power‑throttle**, and an optional **combined
+            multi‑angle video** (2 cameras side by side, or 3 with a main angle on top and
+            the other two below — reuses already‑rendered clips when present). A built‑in
+            update check (on by default, toggle to disable) points you at the next beta.
+            **SHA‑256 checksums** for every file are attached (`*SHA256SUMS*`).
 
             **One requirement:** `ffmpeg`/`ffprobe` on your PATH.
             (`brew install ffmpeg` / `sudo apt install ffmpeg` / `winget install Gyan.FFmpeg`.)
