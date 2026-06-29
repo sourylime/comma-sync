@@ -1,6 +1,13 @@
 # Build output
 Comma Sync.app/
+Comma Sync Go.app/
 macos-app/CommaSync
+macos-app-go/CommaSyncGo
+macos-app-go/core
+macos-app-go/core-arm64
+macos-app-go/core-amd64
+macos-app-go/icon.iconset/
+macos-app-go/icon.icns
 *.dSYM/
 
 # Your footage and synced data — never commit
