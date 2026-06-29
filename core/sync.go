@@ -8,6 +8,8 @@ import (
 // cmdSync is the default flow: find the comma, download new drives (those not in
 // the ledger), then stitch every local drive that isn't processed yet.
 func cmdSync() error {
+	defer keepAwake()()
+	sweepStaleTemps()
 	host, port, cleanup, err := target()
 	if err != nil {
 		logf("Could not reach the comma (%v) — stitching local chunks only.", err)
@@ -61,6 +63,8 @@ func stitchUnprocessedLocal() error {
 // cmdRestitch re-stitches one drive with collision-safe naming, re-downloading
 // its chunks from the comma first if they're not on disk.
 func cmdRestitch(route string) error {
+	defer keepAwake()()
+	sweepStaleTemps()
 	if len(localSegs(route)) == 0 {
 		host, port, cleanup, err := target()
 		if err != nil {

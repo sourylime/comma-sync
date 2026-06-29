@@ -132,6 +132,22 @@ func concatFiles(dir string, segs []string, fname, pattern string) (string, bool
 	return tmp.Name(), any, nil
 }
 
+// mp4OK reports whether an MP4 is finished and playable. An interrupted render (e.g.
+// the Mac slept mid-stitch) leaves a file with no moov atom and no readable duration,
+// so we only trust/reuse a video that ffprobe reports a positive duration for.
+func mp4OK(path string) bool {
+	if fi, err := os.Stat(path); err != nil || fi.Size() == 0 {
+		return false
+	}
+	out, err := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration",
+		"-of", "default=nk=1:nw=1", path).Output()
+	if err != nil {
+		return false
+	}
+	d, _ := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	return d > 0
+}
+
 // countPackets returns the video frame count of an HEVC/MP4 file (cheap; no decode).
 func countPackets(path string) int {
 	out, err := exec.Command("ffprobe", "-v", "error", "-select_streams", "v",
@@ -224,26 +240,42 @@ func buildAudioPCM(dir string, segs []string) (string, float64) {
 // muxCamera writes one camera's MP4. With audio it stretches the PCM to exactly fill
 // this camera's video (atempo) so the totals line up, and re-encodes to AAC (copying
 // the concatenated-TS audio fails with "sample rate not set").
+// Renders to a ".part" temp and renames into place only once ffmpeg succeeds AND the
+// result is verifiably playable, so an interrupted/failed render never leaves a broken
+// file at the final path (later runs would otherwise mistake it for a finished video).
 func muxCamera(combinedHEVC, audioPCM string, audioDur float64, out string) error {
+	part := out + ".part"
+	os.Remove(part)
+	var cmd *exec.Cmd
 	if audioPCM == "" {
-		return exec.Command("ffmpeg", "-y", "-loglevel", "error",
-			"-framerate", fps(), "-i", combinedHEVC, "-c", "copy", "-tag:v", "hvc1", out).Run()
-	}
-	vdur := float64(countPackets(combinedHEVC)) / fpsFloat()
-	tempo := 1.0
-	if vdur > 0 {
-		if tempo = audioDur / vdur; tempo < 0.5 {
-			tempo = 0.5
-		} else if tempo > 2.0 {
-			tempo = 2.0
+		cmd = exec.Command("ffmpeg", "-y", "-loglevel", "error",
+			"-framerate", fps(), "-i", combinedHEVC, "-c", "copy", "-tag:v", "hvc1", "-f", "mp4", part)
+	} else {
+		vdur := float64(countPackets(combinedHEVC)) / fpsFloat()
+		tempo := 1.0
+		if vdur > 0 {
+			if tempo = audioDur / vdur; tempo < 0.5 {
+				tempo = 0.5
+			} else if tempo > 2.0 {
+				tempo = 2.0
+			}
 		}
+		cmd = exec.Command("ffmpeg", "-y", "-loglevel", "error",
+			"-framerate", fps(), "-i", combinedHEVC,
+			"-f", "s16le", "-ar", strconv.Itoa(audioRate), "-ac", "1", "-i", audioPCM,
+			"-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",
+			"-filter:a", fmt.Sprintf("atempo=%.6f", tempo),
+			"-c:a", "aac", "-b:a", "96k", "-tag:v", "hvc1", "-f", "mp4", part)
 	}
-	return exec.Command("ffmpeg", "-y", "-loglevel", "error",
-		"-framerate", fps(), "-i", combinedHEVC,
-		"-f", "s16le", "-ar", strconv.Itoa(audioRate), "-ac", "1", "-i", audioPCM,
-		"-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",
-		"-filter:a", fmt.Sprintf("atempo=%.6f", tempo),
-		"-c:a", "aac", "-b:a", "96k", "-tag:v", "hvc1", out).Run()
+	if err := cmd.Run(); err != nil {
+		os.Remove(part)
+		return err
+	}
+	if !mp4OK(part) {
+		os.Remove(part)
+		return fmt.Errorf("render incomplete (not playable)")
+	}
+	return os.Rename(part, out)
 }
 
 // combineVideo builds one optional multi-angle MP4 from the per-camera MP4s in
@@ -259,7 +291,7 @@ func combineVideo(outdir, stamp, suffix string) {
 			continue
 		}
 		p := filepath.Join(outdir, stamp+"__"+r+suffix+".mp4")
-		if _, err := os.Stat(p); err == nil {
+		if mp4OK(p) {
 			inputs = append(inputs, p)
 			seen[r] = true
 		}
@@ -279,6 +311,8 @@ func combineVideo(outdir, stamp, suffix string) {
 	}
 
 	out := filepath.Join(outdir, stamp+"__combined"+suffix+".mp4")
+	part := out + ".part"
+	os.Remove(part)
 	args := []string{"-y", "-loglevel", "error"}
 	for _, p := range inputs {
 		args = append(args, "-i", p)
@@ -289,12 +323,14 @@ func combineVideo(outdir, stamp, suffix string) {
 	} else {
 		args = append(args, "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p")
 	}
-	args = append(args, "-c:a", "copy", "-movflags", "+faststart", out)
-	if err := exec.Command("ffmpeg", args...).Run(); err != nil {
+	args = append(args, "-c:a", "copy", "-movflags", "+faststart", "-f", "mp4", part)
+	if err := exec.Command("ffmpeg", args...).Run(); err != nil || !mp4OK(part) {
+		os.Remove(part)
 		emit(ProgressEvent{Type: "error", Message: "combined video failed for " + stamp})
-	} else {
-		logf("      combined (%d cams): %s", len(inputs), filepath.Base(out))
+		return
 	}
+	os.Rename(part, out)
+	logf("      combined (%d cams): %s", len(inputs), filepath.Base(out))
 }
 
 // stitchRoute mirrors stitch_route() in comma-sync.sh: concat each camera's HEVC,
@@ -320,13 +356,13 @@ func stitchRoute(route string, collision bool) error {
 	if withCombined() {
 		allExist := true
 		for _, cam := range cams {
-			if _, err := os.Stat(filepath.Join(outdir, stamp+"__"+labelFor(cam)+".mp4")); err != nil {
+			if !mp4OK(filepath.Join(outdir, stamp+"__"+labelFor(cam)+".mp4")) {
 				allExist = false
 				break
 			}
 		}
 		if allExist {
-			if _, err := os.Stat(filepath.Join(outdir, stamp+"__combined.mp4")); err == nil {
+			if mp4OK(filepath.Join(outdir, stamp+"__combined.mp4")) {
 				logf("==> %s: individual + combined videos already exist — nothing to do", stamp)
 				return nil
 			}
