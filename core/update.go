@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const coreVersion = "0.3.0"
+const coreVersion = "0.3.1"
 
 // Default repo to check. Forks can override with --repo owner/name.
 const defaultRepo = "sourylime/comma-sync"
