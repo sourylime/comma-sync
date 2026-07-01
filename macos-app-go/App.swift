@@ -345,7 +345,7 @@ struct ContentView: View {
             logView
         }
         .padding(22)
-        .frame(width: 580, height: 772)
+        .frame(width: 580, height: 884)
         .onAppear {
             setDefaults()
             if drives.isEmpty { drives = loadCachedDrives() }
@@ -405,7 +405,7 @@ struct ContentView: View {
             .padding(8)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor)))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
-            .frame(maxHeight: .infinity)
+            .frame(minHeight: 240, maxHeight: .infinity)
             .onChange(of: runner.log) { _, _ in withAnimation { sp.scrollTo("END", anchor: .bottom) } }
         }
     }
@@ -632,6 +632,9 @@ struct DrivesSheet: View {
                 } else {
                     HStack(spacing: 10) {
                         Spacer()
+                        Button("Restitch Selected") { onBatch(Array(selection)) }
+                            .disabled(selection.isEmpty)
+                            .help("Re-render the selected drives from footage already downloaded — e.g. to apply a new multi-angle layout. Skips any that are already rendered with the current settings.")
                         Button("Download Selected") { onBatch(Array(selection)) }
                             .disabled(selection.isEmpty)
                         Button("Download All") { onBatch(drives.map { $0.route }) }
@@ -690,21 +693,36 @@ struct DrivesSheet: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
-        } else if runner.doneRoutes.contains(d.route) {
-            Label("Synced", systemImage: "checkmark.circle.fill")
-                .font(.caption).foregroundStyle(.green).labelStyle(.titleAndIcon)
-        } else if runner.failedRoutes.contains(d.route) {
-            Label("Failed", systemImage: "exclamationmark.triangle.fill")
-                .font(.caption).foregroundStyle(.orange)
-        } else if runner.isRunning && runner.batchRoutes.contains(d.route) {
-            Text("Queued").font(.caption).foregroundStyle(.secondary)
+        } else if runner.isRunning {
+            // A batch is running and this isn't the drive being processed right now.
+            if runner.doneRoutes.contains(d.route) {
+                Label("Synced", systemImage: "checkmark.circle.fill")
+                    .font(.caption).foregroundStyle(.green).labelStyle(.titleAndIcon)
+            } else if runner.failedRoutes.contains(d.route) {
+                Label("Failed", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.orange)
+            } else if runner.batchRoutes.contains(d.route) {
+                Text("Queued").font(.caption).foregroundStyle(.secondary)
+            }
         } else {
+            // Idle: show a glyph for what happened this session, and ALWAYS offer the
+            // action button — a synced (green) drive can still be re-stitched, e.g. to
+            // apply a new multi-angle layout. (Before, the "Synced" label replaced the
+            // button, so synced drives couldn't be re-stitched even after reloading.)
             HStack(spacing: 10) {
-                Text(d.onDevice ? "on comma" : "on Mac")
-                    .font(.caption2).padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(Capsule().fill(Color(nsColor: .quaternaryLabelColor)))
-                if !runner.isRunning {
-                    Button(d.onDevice ? "Download" : "Re-stitch") { onBatch([d.route]) }
+                if runner.doneRoutes.contains(d.route) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        .help("Synced this session")
+                } else if runner.failedRoutes.contains(d.route) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        .help("Last attempt failed")
+                } else {
+                    Text(d.onDevice ? "on comma" : "on Mac")
+                        .font(.caption2).padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(Capsule().fill(Color(nsColor: .quaternaryLabelColor)))
+                }
+                Button((runner.doneRoutes.contains(d.route) || !d.onDevice) ? "Re-stitch" : "Download") {
+                    onBatch([d.route])
                 }
             }
         }

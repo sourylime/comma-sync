@@ -278,14 +278,50 @@ func muxCamera(combinedHEVC, audioPCM string, audioDur float64, out string) erro
 	return os.Rename(part, out)
 }
 
-// combineVideo builds one optional multi-angle MP4 from the per-camera MP4s in
-// outdir: 2 cams side by side at native aspect; 3 -> primary across the top 2/3,
-// secondary bottom-left, tertiary bottom-right. Roles from PRIMARY/SECONDARY/
-// TERTIARY_CAM (labels road|wide|driver); missing or duplicate roles are skipped,
-// and with fewer than 2 it does nothing. Re-encodes (HW on macOS); copies audio.
+// combinedLayoutTag reads the "csync-layout=<roles>" signature we embed in a combined
+// MP4's comment tag (e.g. "road,driver,wide" = primary,bottom-left,bottom-right), or ""
+// if the file has no such tag (older files, or not one of ours).
+func combinedLayoutTag(path string) string {
+	out, err := exec.Command("ffprobe", "-v", "error", "-show_entries", "format_tags=comment",
+		"-of", "default=nk=1:nw=1", path).Output()
+	if err != nil {
+		return ""
+	}
+	s := strings.TrimSpace(string(out))
+	if strings.HasPrefix(s, "csync-layout=") {
+		return strings.TrimPrefix(s, "csync-layout=")
+	}
+	return ""
+}
+
+// freeCombinedPath returns the lowest-numbered combined output path in outdir that
+// doesn't exist yet ("__combined.mp4", then "__combined (2).mp4", ...), so a new layout
+// never overwrites an already-rendered combined with a different layout.
+func freeCombinedPath(outdir, stamp string) string {
+	base := filepath.Join(outdir, stamp+"__combined")
+	if _, err := os.Stat(base + ".mp4"); os.IsNotExist(err) {
+		return base + ".mp4"
+	}
+	for n := 2; ; n++ {
+		p := fmt.Sprintf("%s (%d).mp4", base, n)
+		if _, err := os.Stat(p); os.IsNotExist(err) {
+			return p
+		}
+	}
+}
+
+// combineVideo builds one optional multi-angle MP4 from the per-camera MP4s in outdir:
+// 2 cams side by side at native aspect; 3 -> primary across the top 2/3, secondary
+// bottom-left, tertiary bottom-right. Roles from PRIMARY/SECONDARY/TERTIARY_CAM (labels
+// road|wide|driver); missing/duplicate roles are skipped, fewer than 2 does nothing.
+//
+// It is layout-aware: the chosen layout is stamped into the output's metadata, and before
+// rendering it scans EVERY existing combined export in the folder. If one already has this
+// exact layout it skips (re-encode not needed); otherwise it renders a NEW export to a free
+// name so a different layout never clobbers an existing one. Re-encodes (HW on macOS).
 func combineVideo(outdir, stamp, suffix string) {
 	seen := map[string]bool{}
-	var inputs []string
+	var inputs, roles []string
 	for _, r := range []string{primaryCam(), secondaryCam(), tertiaryCam()} {
 		if seen[r] {
 			continue
@@ -293,11 +329,23 @@ func combineVideo(outdir, stamp, suffix string) {
 		p := filepath.Join(outdir, stamp+"__"+r+suffix+".mp4")
 		if mp4OK(p) {
 			inputs = append(inputs, p)
+			roles = append(roles, r)
 			seen[r] = true
 		}
 	}
 	if len(inputs) < 2 {
 		return
+	}
+	layout := strings.Join(roles, ",") // e.g. "road,driver,wide" (primary,bottom-left,bottom-right)
+
+	// Already rendered with this exact layout? Skip and say so. (Checks every combined
+	// export in the folder, including "__combined (2).mp4" variants.)
+	existing, _ := filepath.Glob(filepath.Join(outdir, stamp+"__combined*.mp4"))
+	for _, m := range existing {
+		if combinedLayoutTag(m) == layout {
+			logf("      combined [%s] already rendered — skipped re-encode: %s", layout, filepath.Base(m))
+			return
+		}
 	}
 
 	var fc string
@@ -310,7 +358,7 @@ func combineVideo(outdir, stamp, suffix string) {
 			"color=c=black:s=1920x1800:r=" + fps() + "[bg];[bg][p]overlay=0:0[b1];[b1][s]overlay=0:1200[b2];[b2][t]overlay=960:1200:shortest=1[v]"
 	}
 
-	out := filepath.Join(outdir, stamp+"__combined"+suffix+".mp4")
+	out := freeCombinedPath(outdir, stamp)
 	part := out + ".part"
 	os.Remove(part)
 	args := []string{"-y", "-loglevel", "error"}
@@ -330,14 +378,16 @@ func combineVideo(outdir, stamp, suffix string) {
 	} else {
 		args = append(args, "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p")
 	}
-	args = append(args, "-c:a", "copy", "-movflags", "+faststart", "-f", "mp4", part)
+	// Stamp the layout so a later run can tell what's in this file without re-parsing it.
+	args = append(args, "-c:a", "copy", "-movflags", "+faststart",
+		"-metadata", "comment=csync-layout="+layout, "-f", "mp4", part)
 	if err := exec.Command("ffmpeg", args...).Run(); err != nil || !mp4OK(part) {
 		os.Remove(part)
 		emit(ProgressEvent{Type: "error", Message: "combined video failed for " + stamp})
 		return
 	}
 	os.Rename(part, out)
-	logf("      combined (%d cams): %s", len(inputs), filepath.Base(out))
+	logf("      combined (%d cams, %s): %s", len(inputs), layout, filepath.Base(out))
 }
 
 // stitchRoute mirrors stitch_route() in comma-sync.sh: concat each camera's HEVC,
@@ -358,8 +408,11 @@ func stitchRoute(route string, collision bool) error {
 		return err
 	}
 
-	// If the per-camera videos are already in the output folder, reuse them for the
-	// combined video instead of re-rendering everything.
+	// If the per-camera videos are already in the output folder, reuse them: don't
+	// re-stitch the individuals, just let combineVideo decide about the combined. It
+	// renders one only if a combined with the CURRENT layout isn't already present, so
+	// switching the primary/secondary/tertiary and re-running produces the new layout
+	// (as a new export) instead of silently doing nothing or overwriting the old one.
 	if withCombined() {
 		allExist := true
 		for _, cam := range cams {
@@ -369,11 +422,7 @@ func stitchRoute(route string, collision bool) error {
 			}
 		}
 		if allExist {
-			if mp4OK(filepath.Join(outdir, stamp+"__combined.mp4")) {
-				logf("==> %s: individual + combined videos already exist — nothing to do", stamp)
-				return nil
-			}
-			logf("==> %s: using the existing individual videos for the combined (no re-render)", stamp)
+			logf("==> %s: individual videos already exist — checking combined layout", stamp)
 			combineVideo(outdir, stamp, "")
 			return nil
 		}

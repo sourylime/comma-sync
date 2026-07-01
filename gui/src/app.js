@@ -118,6 +118,7 @@ $("selAll").addEventListener("change", (e) => {
 });
 $("dlAll").addEventListener("click", () => batch(drives.map((d) => d.route)));
 $("dlSelected").addEventListener("click", () => batch(selectedRoutes()));
+$("restitchSelected").addEventListener("click", () => batch(selectedRoutes()));
 
 function batch(routes) {
   if (!routes.length) return;
