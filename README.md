@@ -36,6 +36,11 @@ SSH, `scp`, and manual `ffmpeg` work. Comma Sync does it all for you:
   hand-rolled ffmpeg attempts drift; that gap is measured per drive and put back.
 - 🗂️ **Index of everything, everywhere** — one list merging what's still on the comma, what's
   on your computer, and what survives only as finished video, with sizes, cameras and length.
+  Each drive is tagged with **where it is** *and* whether it's **already synced**, so a drive
+  that's still on the comma but finished here doesn't look like work you haven't done. Whether
+  a drive has audio is read straight off the comma too, before you download anything.
+- 📊 **Tells you how much is left** — "Drive 3/7" while it works, counting transfers during the
+  download pass and finished drives once stitching starts.
 - ♻️ **Re-sync or re-stitch anything**, even old drives you deleted locally — it pulls them back.
 - 🗑️ **Optional auto-delete of raw chunks** — only after every video you asked for is verified
   present and playable, so the originals are never thrown away before their replacement exists.

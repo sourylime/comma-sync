@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 )
 
 // jsonProgress is set by the --json flag; when true, sync/restitch emit one JSON
@@ -22,7 +23,7 @@ func emit(e ProgressEvent) {
 		return
 	}
 	switch e.Type {
-	case "log", "done":
+	case "log", "done", "plan":
 		fmt.Println(e.Message)
 	case "drive":
 		fmt.Println("==> " + e.Message)
@@ -33,6 +34,18 @@ func emit(e ProgressEvent) {
 		}
 	case "error":
 		fmt.Fprintln(os.Stderr, "!! "+e.Message)
+	}
+}
+
+// stepTimer reports how long a stage of the stitch took. "It felt slower than it used
+// to" is impossible to act on from a log that never says; short steps stay quiet so the
+// log only gains a line where there's actually time to account for.
+func stepTimer(name string) func() {
+	start := time.Now()
+	return func() {
+		if d := time.Since(start); d >= 3*time.Second {
+			logf("      (%s took %s)", name, d.Round(100*time.Millisecond))
+		}
 	}
 }
 

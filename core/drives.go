@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/base64"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,8 +30,29 @@ func stampFromEpoch(epoch int64) string {
 	return time.Unix(epoch, 0).Format("2006-01-02_15-04-05")
 }
 
-// hasAudioFile shells out to ffprobe to check for an audio stream.
+// qcamHeadBytes is how much of a qcamera.ts is enough to see which streams it carries.
+// A transport stream repeats its program table several times a second, so this covers it
+// many times over while staying small enough to pull off the comma for every drive.
+const qcamHeadBytes = 24 * 1024
+
+// hasAudioFile reports whether a file carries an audio stream. For a transport stream the
+// head of the file answers it outright, which keeps indexing quick; anything else — or a
+// head too short to be sure — falls through to ffprobe.
 func hasAudioFile(path string) bool {
+	if strings.HasSuffix(path, ".ts") {
+		if f, err := os.Open(path); err == nil {
+			buf := make([]byte, qcamHeadBytes)
+			n, _ := io.ReadFull(f, buf)
+			f.Close()
+			if audio, known := tsHasAudio(buf[:n]); known {
+				return audio
+			}
+		}
+	}
+	return ffprobeHasAudio(path)
+}
+
+func ffprobeHasAudio(path string) bool {
 	out, err := exec.Command("ffprobe", "-v", "error", "-select_streams", "a",
 		"-show_entries", "stream=codec_type", "-of", "csv=p=0", path).Output()
 	if err != nil {
@@ -63,6 +87,10 @@ func listDrives() []Drive {
 			if dev.Segments > d.Segments {
 				d.Segments = dev.Segments
 			}
+			// Chunks pulled without audio can't answer the audio question; the comma can.
+			if d.HasAudio == nil {
+				d.HasAudio = dev.HasAudio
+			}
 		}
 		out = append(out, d)
 	}
@@ -79,8 +107,23 @@ func listDrives() []Drive {
 	for _, d := range out {
 		stampSeen[d.Stamp] = true
 	}
-	for _, d := range listStitched() {
+	stitched := listStitched()
+	// A drive that's been stitched but is still on the comma keeps its "device" row — the
+	// comma is the authority on what the drive contains. But its videos ARE already in the
+	// output folder, and without saying so the row looks like work still to do. Mark it,
+	// using the scan we already have rather than re-probing the output folder per drive.
+	doneStamps := map[string]bool{}
+	for _, d := range stitched {
+		doneStamps[d.Stamp] = true
+	}
+	for i := range out {
+		if doneStamps[out[i].Stamp] {
+			out[i].Synced = true
+		}
+	}
+	for _, d := range stitched {
 		if !stampSeen[d.Stamp] {
+			d.Synced = true
 			out = append(out, d)
 			stampSeen[d.Stamp] = true
 		}
@@ -146,10 +189,16 @@ func listLocal() []Drive {
 				stamp = stampFromEpoch(e)
 			}
 		}
-		audio := lastQ != "" && hasAudioFile(lastQ)
+		// No qcamera.ts here means the chunks were pulled without audio, not that the
+		// drive is silent — leave it unknown so the comma (or a later download) can say.
+		var audio *bool
+		if lastQ != "" {
+			a := hasAudioFile(lastQ)
+			audio = &a
+		}
 		drives = append(drives, Drive{
 			Route: route, Stamp: stamp, Cameras: cams,
-			HasAudio: &audio, SizeKB: sizeKB, Segments: len(segs), Location: "local",
+			HasAudio: audio, SizeKB: sizeKB, Segments: len(segs), Location: "local",
 		})
 	}
 	return drives
@@ -167,6 +216,49 @@ for r in $(ls -1d *--*/ 2>/dev/null | sed -E "s#--[0-9]+/##" | sort -u); do
   echo "${r}|${mt}|${cams}|${cnt}|${sz}"
 done`
 
+// remoteAudioScript sends back the head of one qcamera.ts per drive, base64'd so it
+// survives the shell. It picks the LAST segment big enough to read: the newest segment
+// of a drive that's still recording can be a stub, and judging a drive by a stub would
+// report "no audio" on a drive that has it.
+var remoteAudioScript = fmt.Sprintf(`cd /data/media/0/realdata 2>/dev/null || exit 0
+for r in $(ls -1d *--*/ 2>/dev/null | sed -E "s#--[0-9]+/##" | sort -u); do
+  [ "$r" = "boot" ] && continue
+  q=""
+  for f in ${r}--*/qcamera.ts; do
+    [ -e "$f" ] || continue
+    sz=$(stat -c %%s "$f" 2>/dev/null || echo 0)
+    [ "$sz" -ge %d ] && q="$f"
+  done
+  [ -n "$q" ] || continue
+  b=$(head -c %d "$q" | base64 | tr -d "\n")
+  [ -n "$b" ] && echo "${r}|${b}"
+done`, qcamHeadBytes, qcamHeadBytes)
+
+// deviceAudio reports, per route, whether the comma recorded audio for it. Drives it
+// can't judge are simply absent from the map — the index shows nothing rather than
+// guessing "no audio", which is the one answer that would be actively misleading.
+func deviceAudio(c *ssh.Client) map[string]bool {
+	out, err := runCmd(c, remoteAudioScript)
+	if err != nil {
+		return nil
+	}
+	res := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		route, b64, ok := strings.Cut(strings.TrimSpace(line), "|")
+		if !ok || route == "" {
+			continue
+		}
+		buf, derr := base64.StdEncoding.DecodeString(b64)
+		if derr != nil {
+			continue
+		}
+		if audio, known := tsHasAudio(buf); known {
+			res[route] = audio
+		}
+	}
+	return res
+}
+
 func listDevice() []Drive {
 	host, port, cleanup, err := target()
 	if err != nil {
@@ -183,6 +275,7 @@ func listDevice() []Drive {
 
 func listDeviceWith(c *ssh.Client) []Drive {
 	out, _ := runCmd(c, remoteListScript)
+	audioByRoute := deviceAudio(c)
 
 	var drives []Drive
 	for _, line := range strings.Split(out, "\n") {
@@ -210,9 +303,13 @@ func listDeviceWith(c *ssh.Client) []Drive {
 		}
 		sizeKB, _ := strconv.ParseInt(f[4], 10, 64)
 		segs, _ := strconv.Atoi(f[3])
+		var audio *bool
+		if a, ok := audioByRoute[route]; ok {
+			audio = &a
+		}
 		drives = append(drives, Drive{
 			Route: route, Stamp: stamp, Cameras: cams,
-			HasAudio: nil, SizeKB: sizeKB, Segments: segs, Location: "device",
+			HasAudio: audio, SizeKB: sizeKB, Segments: segs, Location: "device",
 		})
 	}
 	return drives

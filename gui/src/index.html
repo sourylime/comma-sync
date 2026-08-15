@@ -149,6 +149,9 @@
     </div>
 
     <div id="progress" class="progress hidden">
+      <!-- Which drive of how many, and what's completing right now. Without this a
+           multi-drive run gives no sense of how much is left. -->
+      <div id="batchLine" class="batchline"></div>
       <div class="bar"><div class="fill" id="progFill"></div></div>
       <div class="prow"><span id="progPct">0%</span><span id="progStatus"></span></div>
     </div>

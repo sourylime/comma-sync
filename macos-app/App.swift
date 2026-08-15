@@ -38,6 +38,28 @@ final class SyncRunner: ObservableObject {
     @Published var batchRoutes: [String] = []
     @Published var doneRoutes: Set<String> = []
     @Published var failedRoutes: Set<String> = []
+    // Which drive of how many is being worked on right now. Sync New picks its own list
+    // of drives, so these come from the core's plan/drive events — the app can't count
+    // them itself, and before this the run gave no sense of how much was left.
+    @Published var driveIndex = 0
+    // Which pass is running. With "download everything first" the whole first pass
+    // finishes nothing, so a done-tally would sit on 0 and read as stuck; what's moving
+    // is the transfer count.
+    @Published var drivePhase = ""
+    @Published var transferredRoutes: Set<String> = []
+
+    // "Drive 3/7" once the run has a shape, otherwise nothing to say yet.
+    var driveCounter: String {
+        guard batchTotal > 0, driveIndex > 0 else { return "" }
+        return "Drive \(driveIndex)/\(batchTotal)"
+    }
+    // What's actually completing right now — transfers during the first pass, finished
+    // drives once stitching starts.
+    var tallyText: String {
+        drivePhase == "download"
+            ? "\(transferredRoutes.count) transferred"
+            : "\(doneRoutes.count) done"
+    }
 
     private var proc: Process?
     private var routeCount = 0
@@ -72,6 +94,9 @@ final class SyncRunner: ObservableObject {
         // drives instead, or the progress line reads nonsense like "5/1".
         batchTotal = max(routes.count, jobs.count)
         batchDone = 0
+        driveIndex = 0
+        drivePhase = ""
+        transferredRoutes = []
         batchRoutes = routes
         routeCount = routes.count
         twoPhase = routes.count > 1 && jobs.count > routes.count
@@ -187,10 +212,30 @@ final class SyncRunner: ObservableObject {
                 if let r = ev.route, !r.isEmpty { currentRoute = r }
             case "routedone":
                 if let r = ev.route, !r.isEmpty {
-                    doneRoutes.insert(r)
-                    if currentRoute == r { currentRoute = nil }
+                    // A finished transfer isn't a finished drive — it only counts as done
+                    // once it's stitched, which is why this is tallied separately.
+                    if ev.phase == "download" {
+                        transferredRoutes.insert(r)
+                    } else {
+                        doneRoutes.insert(r)
+                        if currentRoute == r { currentRoute = nil }
+                    }
                 }
-            case "drive", "log", "done":
+            case "plan":
+                // The core has worked out how many drives this run covers. Sync New starts
+                // with no list at all, so this is the only place the total comes from.
+                if let t = ev.total, t > 0 { batchTotal = t }
+                driveIndex = 0
+                if let m = ev.message, !m.isEmpty { log += m + "\n" }
+            case "drive":
+                progress = nil
+                if let i = ev.index, i > 0 { driveIndex = i }
+                if let t = ev.total, t > 0 { batchTotal = t }
+                if let r = ev.route, !r.isEmpty { currentRoute = r }
+                drivePhase = ev.phase ?? ""
+                batchLabel = driveCounter
+                if let m = ev.message, !m.isEmpty { log += "==> " + m + "\n" }
+            case "log", "done":
                 progress = nil
                 if let m = ev.message, !m.isEmpty { log += m + "\n" }
             case "error":
@@ -220,6 +265,8 @@ struct CoreEvent: Decodable {
     let percent: Double?
     let rateMBps: Double?
     let message: String?
+    let index: Int?      // this drive's position in the run
+    let total: Int?      // how many drives the run covers
 }
 
 struct Drive: Identifiable, Codable {
@@ -230,7 +277,11 @@ struct Drive: Identifiable, Codable {
     let sizeKB: Int
     let segments: Int
     let location: String
+    // Already stitched into the output folder. Independent of location: a drive can be
+    // on the comma AND already synced, and the index has to be able to say both.
+    let synced: Bool?
     var id: String { route }
+    var alreadySynced: Bool { synced == true }
     var onDevice: Bool { location == "device" }
     // Only the stitched per-camera videos remain (raw chunks gone, not on the comma).
     // These can still gain new derived outputs (combined/360/vertical) from the videos.
@@ -629,9 +680,19 @@ struct ContentView: View {
                 let sawDevice = result.contains { $0.location == "device" }
                 scanOffline = !sawDevice
                 if !sawDevice {
-                    let have = Set(result.map { $0.route })
+                    let haveRoutes = Set(result.map { $0.route })
+                    // Also match on the recording time, not just the route. A drive that
+                    // has been stitched is listed under its timestamp folder, which is a
+                    // different string from the comma's route id — so matching by route
+                    // alone let the same drive appear twice: once as a synced drive and
+                    // again as a stale "on comma" row with no audio recorded against it.
+                    let haveStamps = Set(result.map { $0.stamp })
                     let cached = loadCachedDrives()
-                    merged += cached.filter { $0.location == "device" && !have.contains($0.route) }
+                    merged += cached.filter {
+                        $0.location == "device"
+                            && !haveRoutes.contains($0.route)
+                            && !haveStamps.contains($0.stamp)
+                    }
                     merged.sort { $0.stamp > $1.stamp }
                 }
                 drives = merged
@@ -736,7 +797,11 @@ struct DrivesSheet: View {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
                         // Phase-neutral: a batch may be transferring OR re-encoding here.
-                        Text("\(runner.doneRoutes.count)/\(runner.batchTotal) done — you can close this and come back.")
+                        // The drive counter leads, because "which of how many" is the thing
+                        // you want when deciding whether to wait around.
+                        Text(runner.driveCounter.isEmpty
+                             ? "\(runner.tallyText) — you can close this and come back."
+                             : "\(runner.driveCounter) · \(runner.tallyText) — you can close this and come back.")
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         Button(role: .destructive) { runner.cancel() } label: { Text("Stop") }
@@ -786,8 +851,9 @@ struct DrivesSheet: View {
             }
 
             Image(systemName: icon(d))
-                .foregroundStyle(d.onDevice ? .secondary : (d.hasAudio == true ? Color.accentColor : .secondary))
+                .foregroundStyle(d.hasAudio == true ? Color.accentColor : .secondary)
                 .frame(width: 22)
+                .help(iconHelp(d))
             VStack(alignment: .leading, spacing: 2) {
                 Text(d.stamp).font(.callout).bold()
                 Text(d.subtitle).font(.caption).foregroundStyle(.secondary)
@@ -823,6 +889,10 @@ struct DrivesSheet: View {
             } else if runner.failedRoutes.contains(d.route) {
                 Label("Failed", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange)
+            } else if runner.transferredRoutes.contains(d.route) {
+                // Downloaded but not stitched yet — distinct from both queued and done.
+                Label("Transferred", systemImage: "internaldrive")
+                    .font(.caption).foregroundStyle(.secondary)
             } else if runner.batchRoutes.contains(d.route) {
                 Text("Queued").font(.caption).foregroundStyle(.secondary)
             }
@@ -839,10 +909,18 @@ struct DrivesSheet: View {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                         .help("Last attempt failed")
                 } else {
-                    Text(d.stitchedOnly ? "videos only" : (d.onDevice ? "on comma" : "on Mac"))
-                        .font(.caption2).padding(.horizontal, 7).padding(.vertical, 3)
-                        .background(Capsule().fill(Color(nsColor: .quaternaryLabelColor)))
-                        .help(d.stitchedOnly ? "Raw chunks are gone — rebuild new outputs (combined/360/vertical) from the stitched videos" : "")
+                    // Where the footage is and whether it's been stitched are two separate
+                    // facts, so they get two tags. A drive still on the comma that's already
+                    // in the output folder used to read as untouched work.
+                    HStack(spacing: 5) {
+                        badge(d.stitchedOnly ? "videos only" : (d.onDevice ? "on comma" : "on Mac"))
+                            .help(d.stitchedOnly ? "Raw chunks are gone — rebuild new outputs (combined/360/vertical) from the stitched videos" : "")
+                        // "videos only" already means it was stitched — don't say it twice.
+                        if d.alreadySynced && !d.stitchedOnly {
+                            badge("synced", tint: .green)
+                                .help("Already stitched — the videos are in your output folder")
+                        }
+                    }
                 }
                 Button(buttonTitle(d)) {
                     onBatch([d.route])
@@ -851,10 +929,26 @@ struct DrivesSheet: View {
         }
     }
 
+    // Where a drive lives is already spelled out by the badge and the action button, so
+    // this glyph says one thing only: whether the mic was recording. Crucially, "not
+    // known yet" must not look like "no audio" — that was the bug. A drive still on the
+    // comma was never probed for audio, and the fallback glyph read as silent.
     private func icon(_ d: Drive) -> String {
-        if d.onDevice { return "arrow.down.circle" }
+        if let a = d.hasAudio { return a ? "speaker.wave.2.fill" : "speaker.slash" }
         if d.stitchedOnly { return "wand.and.stars" }
-        return d.hasAudio == true ? "speaker.wave.2.fill" : "film"
+        return d.onDevice ? "arrow.down.circle" : "film"
+    }
+    @ViewBuilder
+    private func badge(_ text: String, tint: Color? = nil) -> some View {
+        Text(text)
+            .font(.caption2)
+            .foregroundStyle(tint ?? .primary)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(Capsule().fill(tint?.opacity(0.15) ?? Color(nsColor: .quaternaryLabelColor)))
+    }
+    private func iconHelp(_ d: Drive) -> String {
+        guard let a = d.hasAudio else { return "Audio not known — the drive hasn't been read yet" }
+        return a ? "Recorded with audio" : "No audio in this drive"
     }
     // Video-only drives have no chunks to fetch/re-stitch, so the action is a rebuild of
     // the derived outputs; everything else keeps Download / Re-stitch.

@@ -13,7 +13,7 @@ CORE="$ROOT/core"
 # It keeps the same bundle identifier on purpose, so settings/folders carry over.
 APP_NAME="${APP_NAME:-Comma Sync}"
 APP="$ROOT/${APP_NAME}.app"
-APP_VERSION="${APP_VERSION:-1.2.4}"
+APP_VERSION="${APP_VERSION:-1.3.0}"
 
 echo "==> Building universal Go core (arm64 + x86_64)"
 ( cd "$CORE"

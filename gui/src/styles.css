@@ -236,6 +236,13 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
   font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px;
   background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent);
 }
+/* Where a drive lives and whether it's been stitched are separate facts, so a drive
+   can carry both tags at once. */
+.badges { display: flex; gap: 5px; align-items: center; }
+.badge.done {
+  background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green);
+}
+.batchline { font-size: 12px; color: var(--gray); margin-bottom: 6px; }
 .status { font-size: 12px; min-width: 92px; text-align: right; color: var(--gray); }
 .status.done { color: var(--green); font-weight: 600; }
 .minibar { width: 84px; height: 6px; background: var(--track); border-radius: 3px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 4px; }

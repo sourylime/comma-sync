@@ -15,6 +15,26 @@ let drives = [];           // last indexed drive list
 let running = false;
 let jobQueue = [];         // pending arg-arrays to run sequentially
 const rowByRoute = {};     // route -> DOM row (for live status)
+// How far through the run we are. Sync New is handed no list of drives — the core
+// discovers them and reports the count — so this is the only source for "drive 3 of 7".
+const runState = { index: 0, total: 0, phase: "", transferred: new Set(), done: new Set() };
+
+function resetBatch() {
+  runState.index = 0; runState.total = 0; runState.phase = "";
+  runState.transferred = new Set(); runState.done = new Set();
+  $("batchLine").textContent = "";
+}
+
+function renderBatchLine() {
+  if (!runState.total) { $("batchLine").textContent = ""; return; }
+  // During the transfer-everything-first pass nothing is stitched yet, so a "done"
+  // tally would sit at zero the whole time and read as stuck. Count what's moving.
+  const tally = runState.phase === "download"
+    ? `${runState.transferred.size} transferred`
+    : `${runState.done.size} done`;
+  const pos = runState.index > 0 ? `Drive ${runState.index}/${runState.total} · ` : "";
+  $("batchLine").textContent = pos + tally;
+}
 
 function opts() {
   return {
@@ -64,6 +84,7 @@ function runQueue(jobs) {
   if (running || !jobs.length) return;
   jobQueue = jobs.slice();
   $("log").textContent = "";
+  resetBatch();
   setRunning(true);
   runNext();
 }
@@ -102,9 +123,33 @@ listen("core-event", (e) => {
       else updateRow(ev.route, pct + "%" + rate, pct);
       break;
     }
-    case "drive": logLine("==> " + ev.message); break;
+    case "plan":
+      // The core has settled how many drives this run covers, before any transfer starts.
+      runState.total = ev.total || 0;
+      runState.index = 0;
+      renderBatchLine();
+      if (ev.message) logLine(ev.message);
+      break;
+    case "drive":
+      if (ev.index > 0) runState.index = ev.index;
+      if (ev.total > 0) runState.total = ev.total;
+      runState.phase = ev.phase || "";
+      renderBatchLine();
+      logLine("==> " + ev.message);
+      break;
     case "log": logLine(ev.message); break;
-    case "routedone": markDone(ev.route); break;
+    case "routedone":
+      // A finished transfer is not a finished drive — it only counts as done once it
+      // has been stitched.
+      if (ev.phase === "download") {
+        runState.transferred.add(ev.route);
+        updateRow(ev.route, "Transferred", null);
+      } else {
+        runState.done.add(ev.route);
+        markDone(ev.route);
+      }
+      renderBatchLine();
+      break;
     case "done": logLine(ev.message); markDone(ev.route); break;
     case "error": logLine("!! " + ev.message); break;
   }
@@ -163,7 +208,13 @@ function renderDrives() {
   list.innerHTML = "";
   for (const d of drives) {
     const onComma = d.location === "device";
-    const badge = onComma ? "on comma" : d.location === "stitched" ? "videos only" : "local";
+    const where = onComma ? "on comma" : d.location === "stitched" ? "videos only" : "on this computer";
+    // A drive can be on the comma AND already stitched here. Showing only where it
+    // lives made finished work look like work still to do. "videos only" already
+    // means it was stitched, so it doesn't get the tag twice.
+    const syncedTag = d.synced && d.location !== "stitched"
+      ? '<span class="badge done" title="Already stitched — the videos are in your output folder">synced</span>'
+      : "";
     const audio = d.hasAudio === true ? " · audio" : d.hasAudio === false ? " · no audio" : "";
     const row = document.createElement("div");
     row.className = "drive";
@@ -173,7 +224,7 @@ function renderDrives() {
         <div class="dname">${d.stamp}</div>
         <div class="dsub">${(d.cameras || []).join(", ")}${audio} · ${fmtSize(d.sizeKB)} · ${d.segments} min</div>
       </div>
-      <span class="badge">${badge}</span>
+      <span class="badges"><span class="badge">${where}</span>${syncedTag}</span>
       <span class="status"></span>`;
     list.appendChild(row);
     rowByRoute[d.route] = row;
